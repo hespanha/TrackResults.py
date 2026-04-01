@@ -1,0 +1,22 @@
+[project]
+name = "track_results"
+version = "0.1.0"
+description = "A python package to store summaries of the results of multiple runs of one or several ML algorithms, to eventually select the best algorithms and/or set of meta-parameters."
+readme = "README.md"
+requires-python = ">=3.9"
+license-files = ["LICENSE.txt"]
+authors = [{ name = "Joao Hespanha", email = "hespanha@ece.ucsb.edu" }]
+
+dependencies = [
+    "numpy>=1.26",
+    #"json5",
+    "pandas",
+    "mongita",
+    "pymongo",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]               # Scans for packages in the "src" directory
+include = ["track_results"] # Only includes packages matching this pattern
+exclude = ["*.tests"]       # Excludes test packages
+namespaces = true           # Enables implicit namespace packages (default behavior)

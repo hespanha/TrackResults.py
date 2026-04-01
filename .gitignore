@@ -1,0 +1,8 @@
+/.DS_Store
+/.venv
+/.vscode
+/dist
+/my_secrets.py
+/testenv
+/track_results.egg-info
+/activate
