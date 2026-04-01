@@ -20,10 +20,10 @@ Create a local environment and install track_results and its dependencies using 
     ```bash
     python -m venv .venv
     source .venv/bin/activate
-    pip install -e . # searches for pyproject.toml file
+    pip install git+https://github.com/hespanha/TrackResults.py
     ```
 
-## Optional
+## Install MondoDB (optional)
 
 When using MondoDB, a server needs to be available. A MondoDB server can be installed as follows:
 
@@ -285,22 +285,3 @@ When using MondoDB, a server needs to be available. A MondoDB server can be inst
         collection.drop()
         ``
 
-## Build the package
-
-1) Build
-
-        ```bash
-        pip install --upgrade build twine
-        python -m build
-        ```
-
-2) Test installation locally
-
-````bash
-deactivate
-python -m venv testenv
-source testenv/bin/activate 
-pip install ./dist/your_package_unique_name-0.0.1-py3-none-any.whl
-
-python -c "import test_results; print('Success!')"
-```
