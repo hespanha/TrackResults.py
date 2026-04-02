@@ -135,7 +135,8 @@ def interesting_columns(
         interesting_cols = [
             col
             for col in cols2search
-            if isinstance(df.iloc[0][col], float) and not np.isnan(df.iloc[0][col])
+            if not isinstance(df.iloc[0][col], float)
+            or (isinstance(df.iloc[0][col], float) and not np.isnan(df.iloc[0][col]))
         ]
     if len(interesting_cols) == 0:
         raise ValueError("All columns dropped")
