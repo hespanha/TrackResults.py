@@ -105,7 +105,7 @@ class TestTrackResults(unittest.TestCase):
 
         # Test querying with a filter string
         # Note: using backticks for columns with dots
-        df_filtered = self.tracker.get("`parameters.lr` == 0.01")
+        df_filtered = self.tracker.get(query="`parameters.lr` == 0.01")
         print(df_filtered)
         self.assertEqual(len(df_filtered), 1)
         self.assertEqual(df_filtered.iloc[0]["parameters.opt"], "adam")
