@@ -137,6 +137,7 @@ def interesting_columns(
             for col in cols2search
             if not isinstance(df.iloc[0][col], float)
             or (isinstance(df.iloc[0][col], float) and not np.isnan(df.iloc[0][col]))
+            or col in keep
         ]
     if len(interesting_cols) == 0:
         raise ValueError("All columns dropped")
@@ -437,7 +438,6 @@ if __name__ == "__main__":
     import unittest
     import sys
 
-    sys.path.append(".")
     import tests.test_track_results
 
     # Run all tests
