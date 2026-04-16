@@ -194,15 +194,20 @@ class TrackResults:
             client = pymongo.MongoClient(uri)
         self.database = client[database]
 
-        if verbose:
-            collection_names = self.database.list_collection_names()
-            print(f"Selecting collection={collection} out of:")
-            for i, name in enumerate(collection_names):
-                print(f"  {i:3}: {name}")
-
         self.collection = self.database[collection]
 
         self.columns = None
+
+        if verbose:
+            collection_names = self.database.list_collection_names()
+            print(
+                f'Selecting collection="{collection}" (with {len(self)} records) from:'
+            )
+            for i, name in enumerate(collection_names):
+                print(f"  {i:3}: {name}")
+
+    def __len__(self):
+        return self.collection.count_documents({})
 
     def drop(self, simulate: bool = True):
         if simulate:

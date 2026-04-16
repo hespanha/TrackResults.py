@@ -62,6 +62,7 @@ class TestTrackResults(unittest.TestCase):
         self.assertEqual(
             df.shape, (1, 3 + 3 + 1 + 9)
         )  # parameters+results+date+platform
+        self.assertEqual(len(self.tracker), 1)
 
         print("track @ 1\n")  # , self.tracker)
 
@@ -75,6 +76,7 @@ class TestTrackResults(unittest.TestCase):
         self.assertEqual(
             df.shape, (2, 3 + 3 + 1 + 9)
         )  # parameters+results+date+platform
+        self.assertEqual(len(self.tracker), 2)
 
         print("track @ 2\n")  # , self.tracker)
 
@@ -88,11 +90,19 @@ class TestTrackResults(unittest.TestCase):
         self.assertEqual(
             df.shape, (2, 3 + 3 + 1 + 9)
         )  # parameters+results+date+platform
+        self.assertEqual(len(self.tracker), 2)
 
         # Add forth record (repeated but does not replace)
         params2 = {"lr": 0.02, "opt": "sgd"}
         results2 = {"acc": 0.6}
         self.tracker.add(params2, results2, replace=False)
+        df = self.tracker.get()
+        # print(df.keys())
+        print(df)
+        self.assertEqual(
+            df.shape, (3, 3 + 3 + 1 + 9)
+        )  # parameters+results+date+platform
+        self.assertEqual(len(self.tracker), 3)
 
         print(f"test_add() {time.perf_counter()-t0} sec")
 

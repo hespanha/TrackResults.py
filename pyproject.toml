@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "track_results"
-version = "0.1.1"
+version = "0.1.2"
 description = "A python package to store summaries of the results of multiple runs of one or several ML algorithms, to eventually select the best algorithms and/or set of meta-parameters."
 readme = "README.md"
 requires-python = ">=3.9"
