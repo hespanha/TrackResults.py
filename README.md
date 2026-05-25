@@ -5,9 +5,9 @@ to eventually select the best algorithms and/or set of meta-parameters.
 
 The information stored includes:
 
-    + algorithm's meta-parameters
-    + platform where algorithm was executed
-    + key metrics for the results (including timing information)
++ algorithm's meta-parameters
++ platform where algorithm was executed
++ key metrics for the results (including timing information)
 
 The results can either be stored in a local mongita database or in a remote mongoDB. The latter
 option is particularly useful when algorithms are executed in multiple computers (perhaps
@@ -15,11 +15,11 @@ concurrently).
 
 ## Features
 
-- **Flexible Storage**: Support for local storage (using `mongita`) and remote centralized storage (using `MongoDB`).
-- **Metadata Tracking**: Automatically captures algorithm meta-parameters and platform execution details.
-- **Performance Metrics**: Records timing information and key performance metrics.
-- **Pandas Integration**: Easily retrieve results directly into a Pandas DataFrame for analysis.
-- **Powerful Querying**: Filter and sort through experiment runs using a flexible query interface.
++ **Flexible Storage**: Support for local storage (using `mongita`) and remote centralized storage (using `MongoDB`).
++ **Metadata Tracking**: Automatically captures algorithm meta-parameters and platform execution details.
++ **Performance Metrics**: Records timing information and key performance metrics.
++ **Pandas Integration**: Easily retrieve results directly into a Pandas DataFrame for analysis.
++ **Powerful Querying**: Filter and sort through experiment runs using a flexible query interface.
 
 ## Basic Usage
 
