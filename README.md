@@ -9,9 +9,63 @@ The information stored includes:
     + platform where algorithm was executed
     + key metrics for the results (including timing information)
 
-The results can either be stored in a local mongita database, or in a remote mongoDB. The later
+The results can either be stored in a local mongita database or in a remote mongoDB. The latter
 option is particularly useful when algorithms are executed in multiple computers (perhaps
 concurrently).
+
+## Features
+
+- **Flexible Storage**: Support for local storage (using `mongita`) and remote centralized storage (using `MongoDB`).
+- **Metadata Tracking**: Automatically captures algorithm meta-parameters and platform execution details.
+- **Performance Metrics**: Records timing information and key performance metrics.
+- **Pandas Integration**: Easily retrieve results directly into a Pandas DataFrame for analysis.
+- **Powerful Querying**: Filter and sort through experiment runs using a flexible query interface.
+
+## Basic Usage
+
+```python
+from track_results import TrackResults
+import my_secrets  # File containing your connection strings (e.g., MONGODB_URI)
+
+# Initialize the tracker. 
+# Use a MongoDB URI for remote storage or leave it empty for a local database.
+tracker = TrackResults(uri=my_secrets.MONGODB_URI, collection="nnpbits")
+
+# Define the parameters for your experiment
+parameters = {
+        "seed": 42,
+        "input_size": 1,
+        "n_average_samples": n_average_samples,
+        "batch_size": batch_size,
+        "num_iterations": 25000,
+        "stochastic_hidden": stochastic_hidden,
+        "optimizer": {
+            "type": "Adam",
+            "weight_decay": 0,
+            "lr": lr,
+        },
+    }
+
+# Execute your training function
+results = trains_neural_network(*parameters)
+
+# Record the parameters and training results in the database
+tracker.add(parameters=parameters, results=results, replace=True)
+
+# Retrieve results from the tracker as a formatted Pandas DataFrame
+from ipython import display
+df = tracker.get(
+        # Filter results based on specific criteria
+        query="`n_rows`>=2 and `rounds`>=12",
+        # Select which columns to include in the output table
+        columns=["parameters_batch_size","parameters_num_iterations","parameters_stochastic_hidden","parameters_optimizer_lr","results_loss","results_time"],
+        drop_constant_columns=True,  # Remove columns where values don't change
+        sort_by_columns=True,         # Automatically sort by the provided columns
+        allow_duplicate_replacements=True,
+    )
+# Display the results in an interactive environment (like Jupyter)
+display(df)
+```
 
 ## Installation
 
@@ -284,4 +338,3 @@ When using MondoDB, a server needs to be available. A MondoDB server can be inst
 
         collection.drop()
         ``
-
