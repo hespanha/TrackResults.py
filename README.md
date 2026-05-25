@@ -23,59 +23,79 @@ concurrently).
 
 ## Basic Usage
 
-```python
-from track_results import TrackResults
-import my_secrets  # File containing your connection strings (e.g., MONGODB_URI)
+    ```python
+    from track_results import TrackResults
+    import my_secrets  # File containing your connection strings (e.g., MONGODB_URI)
 
-# Initialize the tracker. 
-# Use a MongoDB URI for remote storage or leave it empty for a local database.
-tracker = TrackResults(uri=my_secrets.MONGODB_URI, collection="nnpbits")
+    # Initialize the tracker. 
+    # Use a MongoDB URI for remote storage or leave it empty for a local database.
+    tracker = TrackResults(uri=my_secrets.MONGODB_URI, collection="track_results_collection")
 
-# Define the parameters for your experiment
-parameters = {
-        "seed": 42,
-        "input_size": 1,
-        "n_average_samples": n_average_samples,
-        "batch_size": batch_size,
-        "num_iterations": 25000,
-        "stochastic_hidden": stochastic_hidden,
-        "optimizer": {
-            "type": "Adam",
-            "weight_decay": 0,
-            "lr": lr,
-        },
-    }
+    # Define the parameters for your experiment
+    parameters = {
+            "class":"train_neural_network",
+            "seed": 42,
+            "input_size": 1,
+            "n_average_samples": n_average_samples,
+            "batch_size": batch_size,
+            "num_iterations": 25000,
+            "stochastic_hidden": stochastic_hidden,
+            "optimizer": {
+                "type": "Adam",
+                "weight_decay": 0,
+                "lr": lr,
+            },
+        }
 
-# Execute your training function
-results = trains_neural_network(*parameters)
+    # Execute your training function
+    results = trains_neural_network(*parameters)
 
-# Record the parameters and training results in the database
-tracker.add(parameters=parameters, results=results, replace=True)
+    # Record the parameters and training results in the database
+    tracker.add(parameters=parameters, results=results, replace=True)
 
-# Retrieve results from the tracker as a formatted Pandas DataFrame
-from ipython import display
-df = tracker.get(
-        # Filter results using a MongoDB dictionary
-        filter={
-            "parameters_seed":42,
-            "parameters_batch_size": {"$gte": 64}, 
-            "results_loss": {"$lt": 0.5}},
-        # Select and rename columns for display using a dictionary
-        columns={
-            "parameters_batch_size": "batch",
-            "parameters_num_iterations": "iters",
-            "parameters_stochastic_hidden": "hidden",
-            "parameters_optimizer_lr": "lr",
-            "results_loss": "loss",
-            "results_time": "time"
-        },
-        drop_constant_columns=True,  # Remove columns where values don't change
-        sort_by_columns=True,         # Automatically sort by the provided columns
-        allow_duplicate_replacements=True,
-    )
-# Display the results in an interactive environment (like Jupyter)
-display(df)
-```
+    # Retrieve results from the tracker as a formatted Pandas DataFrame
+    from IPython import display
+    df = tracker.get(
+            # Filter results using a MongoDB dictionary
+            filter={
+                "parameters_seed":42,
+                "parameters_batch_size": {"$gte": 64}, 
+                "results_loss": {"$lt": 0.5}},
+            # Select and rename columns for display using a dictionary
+            columns={
+                "parameters_batch_size": "batch",
+                "parameters_num_iterations": "iters",
+                "parameters_stochastic_hidden": "hidden",
+                "parameters_optimizer_lr": "lr",
+                "results_loss": "loss",
+                "results_time": "time"
+            },
+            drop_constant_columns=True,  # Remove columns where values don't change
+            sort_by_columns=True,         # Automatically sort by the provided columns
+            allow_duplicate_replacements=True,
+        )
+    # Display the results in an interactive environment (like Jupyter)
+    display(df)
+    ```
+
+All results from a collection can be removed with
+
+    ```python
+        tracker = TrackResults(uri=my_secrets.MONGODB_URI, collection="track_results_collection")
+        tracker.drop(simulate=False)
+    ```
+
+More often, we may want to remove just a few results:
+
+    ```python
+        tracker = TrackResults(uri=my_secrets.MONGODB_URI, collection="track_results_collection")
+        tracker.remove(
+            filter={
+                "class":"train_neural_network",
+                "parameters_batch_size": {"$gte": 64}, 
+                "results_loss": {"$lt": 0.5}},
+            simulate=False)
+    ```
 
 ## Installation
 
