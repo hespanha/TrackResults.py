@@ -55,10 +55,20 @@ tracker.add(parameters=parameters, results=results, replace=True)
 # Retrieve results from the tracker as a formatted Pandas DataFrame
 from ipython import display
 df = tracker.get(
-        # Filter results based on specific criteria
-        query="`n_rows`>=2 and `rounds`>=12",
-        # Select which columns to include in the output table
-        columns=["parameters_batch_size","parameters_num_iterations","parameters_stochastic_hidden","parameters_optimizer_lr","results_loss","results_time"],
+        # Filter results using a MongoDB dictionary
+        filter={
+            "parameters_seed":42,
+            "parameters_batch_size": {"$gte": 64}, 
+            "results_loss": {"$lt": 0.5}},
+        # Select and rename columns for display using a dictionary
+        columns={
+            "parameters_batch_size": "batch",
+            "parameters_num_iterations": "iters",
+            "parameters_stochastic_hidden": "hidden",
+            "parameters_optimizer_lr": "lr",
+            "results_loss": "loss",
+            "results_time": "time"
+        },
         drop_constant_columns=True,  # Remove columns where values don't change
         sort_by_columns=True,         # Automatically sort by the provided columns
         allow_duplicate_replacements=True,
