@@ -204,7 +204,7 @@ class TestTrackResults(unittest.TestCase):
         self.tracker.remove(
             filter={
                 "platform_node": "dorabella.local",
-                "platform_architecture": "('64bit', '')",
+                "platform_architecture": ["64bit", ""],
                 "platform_machine": "x86_64",
                 "results_acc": {"$gte": 0.5},
             },
@@ -215,13 +215,14 @@ class TestTrackResults(unittest.TestCase):
         self.tracker.remove(
             filter={
                 "platform_node": "dorabella.local",
-                "platform_architecture": "('64bit', '')",
+                "platform_architecture": ["64bit", ""],
                 "platform_machine": "x86_64",
                 "results_acc": {"$gte": 0.5},
             },
             simulate=False,
         )
         df = self.tracker.get()
+        print(df)
         self.assertEqual(len(df), 1)
 
         print(f"test_remove() {time.perf_counter()-t0} sec")

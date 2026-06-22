@@ -17,7 +17,7 @@
         python -m build
         ```
 
-    Attention: make sure "version" in pyproject.toml macthes "__version__" in __init__.py
+    Attention: make sure "version" in pyproject.toml matches "__version__" in __init__.py
 
 2) Test installation locally
 

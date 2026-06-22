@@ -19,8 +19,10 @@ from __future__ import annotations
 from typing import Any
 
 import platform
+import uuid
 import numpy as np
 import pandas as pd
+import datetime
 import pprint
 
 #######################
@@ -28,6 +30,26 @@ import pprint
 #######################
 
 FLATTEN_SEPARATOR = "_"
+
+TYPES_TO_KEEP_AS_IS = (
+    type(None),
+    bool,
+    int,
+    float,
+    bytes,
+    str,
+    pd.Timestamp,
+    datetime.datetime,
+    list,
+    dict,
+    uuid.UUID,
+)
+
+# not natively supported by pymongo, but supported when converted to list
+TYPE_CONVERT_TO_LIST = (
+    tuple,
+    set,
+)
 
 
 def flatten_dict(input: dict, prefix: str = "") -> dict[str, Any]:
@@ -54,15 +76,21 @@ def flatten_dict(input: dict, prefix: str = "") -> dict[str, Any]:
             v = flatten_dict(v, prefix=key + FLATTEN_SEPARATOR)
             # print("flattened: ", v)
             output |= v
-        # FIXME conversion to string makes sure table is sortable
+        # FIXME conversion to string makes sure table is sortable, but makes searches and sorting
+        # more difficult.
         # FIXME might not be needed with pymongoarrow (but needed with mongita)
         elif isinstance(v, np.ndarray):
-            v = np.array2string(v)
+            # v = np.array2string(v)
+            v = (
+                v.tolist()
+            )  # supported by pymongo and mongita (unlike np.ndarray, and keeps the array structure
             output[key] = v
-        elif not isinstance(v, (int, float, str, bool, type(None), pd.Timestamp)):
+        elif isinstance(v, TYPE_CONVERT_TO_LIST):
+            output[key] = list(v)
+        elif isinstance(v, TYPES_TO_KEEP_AS_IS):
+            output[key] = v
+        else:  # if all else fails...
             output[key] = str(v)
-        else:
-            output[key] = v
     return output
 
 
@@ -342,7 +370,13 @@ class TrackResults:
             ].to_list()
             parameter_fields.append("date")
             # print(f"sorting by {parameter_fields}")
-            df.sort_values(by=parameter_fields, inplace=True)
+            df.sort_values(
+                by=parameter_fields,
+                key=lambda col: (
+                    col.astype(str) if col.dtype == "object" else col
+                ),  # protection against unhashable types (e.g. dicts) that might be in parameters, but still sort them in a deterministic way
+                inplace=True,
+            )
 
         # filter by time
         for row in df.iterrows():
@@ -382,7 +416,13 @@ class TrackResults:
         if columns is not None and sort_by_columns:
             sort_by = [c for c in columns.values() if c in df.columns]
             # print("sort_by", sort_by)
-            df.sort_values(by=sort_by, inplace=True)
+            df.sort_values(
+                by=sort_by,
+                key=lambda col: (
+                    col.astype(str) if col.dtype == "object" else col
+                ),  # protection against unhashable types (e.g. dicts) that might be in parameters, but still sort them in a deterministic way
+                inplace=True,
+            )
 
         # drop constant columns
         if drop_constant_columns:
