@@ -10,7 +10,7 @@
 
 ## Publish
 
-1) Build
+1) Build -- needed to update the published version (?)
 
         ```bash
         pip install --upgrade build twine
