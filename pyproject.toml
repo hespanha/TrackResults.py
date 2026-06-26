@@ -17,6 +17,7 @@ dependencies = [
     "pandas",
     "mongita",
     "pymongo",
+    "pydantic>=2.0",
 ]
 
 [tool.setuptools.packages.find]

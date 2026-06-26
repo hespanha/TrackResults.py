@@ -9,7 +9,7 @@ import sys
 
 sys.path.append(".")
 
-from track_results.track_results_json import TrackResultsJSON
+from old.track_results_json import TrackResultsJSON
 
 
 class TestTrackResults(unittest.TestCase):

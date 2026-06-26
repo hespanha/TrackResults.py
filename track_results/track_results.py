@@ -18,6 +18,8 @@ df=track.query({class:,game:},last_number:int,last_time:time.period|time.duratio
 from __future__ import annotations
 from typing import Any
 
+import pydantic
+
 import platform
 import uuid
 import numpy as np
@@ -114,33 +116,13 @@ def interesting_column(df, col) -> bool:
         n_unique = None
         try:
             # solves case when some columns of nan get get mapped to dtype object
-            vals = set(val for val in df[col])
+            vals = set(df[col])
             n_vals = len(vals)
             interesting = n_vals > 1
         except:
             vals = None
             n_vals = None
             interesting = True
-    if False and interesting:
-        # debug
-        try:
-            vals = np.unique(df[col].to_numpy())
-            # n_vals = len(set(val for val in df[col]))
-            n_vals = len(vals)
-        except:
-            vals = None
-            n_vals = None
-        print(
-            f"  {col:60}:interesting={str(interesting):10} {str(df[col].dtypes):20}{df[col].dtypes.__class__.__name__:20}, hashable={df[col].dtype in _hashable:5}, n_unique={str(n_unique):5}, n_vals={n_vals}"
-        )
-        if n_unique is None:
-            print("not hashable", df[col])
-        if n_vals is not None and n_unique is not None and n_vals != n_unique:
-            print("mismatch", vals)
-            if interesting:
-                raise ValueError(
-                    'n_unique and n_vals mismatch for columns that was deemed "interesting", probably need fixing'
-                )
 
     return interesting
 
@@ -215,10 +197,10 @@ class TrackResults:
             filename (str): The path to the file where results will be saved.
         """
         if uri is None:
-            print(f"TrackResultsTrackResultsMongoDB: using MongitaClientDisk")
+            print("TrackResultsTrackResultsMongoDB: using MongitaClientDisk")
             client = mongita.MongitaClientDisk()
         else:
-            print(f"TrackResultsTrackResultsMongoDB: using MongoClient")
+            print("TrackResultsTrackResultsMongoDB: using MongoClient")
             client = pymongo.MongoClient(uri)
         self.database = client[database]
 
@@ -251,7 +233,11 @@ class TrackResults:
             )
 
     def add(
-        self, parameters: dict[str, Any], results: dict[str, Any], replace: bool = False
+        self,
+        parameters: dict[str, Any] | pydantic.BaseModel,
+        results: dict[str, Any] | pydantic.BaseModel,
+        replace: bool = False,
+        flatten: bool = True,
     ) -> None:
         """
         Adds a new result record to the tracking file.
@@ -261,9 +247,16 @@ class TrackResults:
             results (dict[str, Any]): The results obtained from the experiment.
         """
 
+        # convert pydantic.BaseModel to regular dict supported by pymongo and mongita
+        if isinstance(parameters, pydantic.BaseModel):
+            parameters = parameters.model_dump()
+        if isinstance(results, pydantic.BaseModel):
+            results = results.model_dump()
+
         platform_dict = {
             "node": platform.node(),
-            "architecture": platform.architecture(),
+            # convert to list to be compatible with pymongo and mongita
+            "architecture": list(platform.architecture()),
             "machine": platform.machine(),
             "processor": platform.processor(),
             "system": platform.system(),
@@ -273,27 +266,27 @@ class TrackResults:
             "python_implementation": platform.python_implementation(),
         }
 
-        fields2match = flatten_dict(
-            {"parameters": parameters} | {"platform": platform_dict}
-        )
-        record = flatten_dict(
-            {
-                # FIXME: mongodb should handle dates automatically
-                # "date": str(pd.Timestamp.now()),
-                "date": pd.Timestamp.now(),
-                "platform": platform_dict,
-                "parameters": parameters,
-                "results": results,
-            }
-        )
+        fields2match = {"parameters": parameters, "platform": platform_dict}
+        full_record = {
+            "date": pd.Timestamp.now(),
+            "platform": platform_dict,
+            "parameters": parameters,
+            "results": results,
+        }
+
+        if flatten:
+            fields2match = flatten_dict(fields2match)
+            full_record = flatten_dict(full_record)
+
         # pprint.pprint(record, indent=3)
 
         if replace:
-            filter = fields2match
             rc = self.collection.replace_one(
-                filter, record, upsert=True  # add if not there
+                filter=fields2match,
+                replacement=full_record,
+                upsert=True,  # add if not there
             )
-            # print("filter:", filter)
+            # print("fields_to_match:", fields_to_match)
             # print("rc:", rc)
             # data: list[dict[str, Any]] = [doc for doc in self.collection.find(filter)]
             # print(data)
@@ -309,20 +302,20 @@ class TrackResults:
                     f"TrackResultsMongoDB.add(replace=True): added record with upserted_id={rc.upserted_id}"
                 )
         else:
-            rc = self.collection.insert_one(record)
+            rc = self.collection.insert_one(full_record)
             print("rc:", rc)
             print(
                 f"TrackResultsMongoDB.add(replace=False): inserted record with id={rc.inserted_id}"
             )
 
     def __str__(self):
-        data = [doc for doc in self.collection.find({})]
+        data = list(self.collection.find({}))
         return str(data)
 
     def get(
         self,
         *,
-        filter: dict = {},
+        filter: dict[str, Any] = {},
         query: str | None = None,
         last_time: pd.Timestamp | None = None,
         time_interval: pd.Timedelta | None = None,
@@ -333,6 +326,7 @@ class TrackResults:
         sort_by_columns: bool = False,
         query_before_rename: bool = False,
         allow_duplicate_replacements: bool = False,
+        flatten: bool = True,
     ) -> pd.DataFrame:
         """
         Queries the results file and returns a pandas DataFrame.
@@ -341,7 +335,10 @@ class TrackResults:
             query (str): pandas query to select rows
             last_time (pd.Timestamp | None, optional): Filter results older than this time. Defaults to None.
             time_interval (pd.Timedelta | None, optional): Filter results older than now - time_interval. Defaults to None.
-            columns (dict[str,str] | None, optional): Dictionary of with columns to keep (keys) and new names (values). Defaults to None.
+            columns (dict[str,str] | None, optional): Dictionary of with columns to keep (keys)
+                and new names (values). Defaults to None.
+            flatten (bool, optional): Whether to flatten nested dictionaries before converting
+                to DataFrame. Defaults to True.
 
 
         Returns:
@@ -351,17 +348,16 @@ class TrackResults:
         if columns is None:
             columns = self.columns
 
-        data: list[dict[str, Any]] = [doc for doc in self.collection.find(filter)]
+        data: list[dict[str, Any]] = list(self.collection.find(filter))
         # print(f"TrackResultsMongoDB.get: collection.find() found {len(data)} records")
+
+        if flatten:
+            data = [flatten_dict(record) for record in data]
 
         if data:
             df = pd.DataFrame.from_records(data, index="_id")
         else:
             return pd.DataFrame()
-
-        # FIXME: mongodb should handle dates automatically
-        # if "date" in df.columns:
-        #    df["date"] = pd.to_datetime(df["date"])
 
         # sort by parameters
         if sort_by_params:
@@ -428,9 +424,6 @@ class TrackResults:
         if drop_constant_columns:
             df = interesting_columns(df, keep=keep_columns)
 
-        # assert (
-        #     len(self.__dict__) == 0
-        # ), f"`__slots__` incomplete for `{self.__class__.__name__}`, add {list(self.__dict__.keys())}"
         return df
 
     def remove(
@@ -446,7 +439,7 @@ class TrackResults:
         Args:
             query (str): pandas query to select rows
         """
-        data: list[dict[str, Any]] = [doc for doc in self.collection.find(filter)]
+        data: list[dict[str, Any]] = list(self.collection.find(filter))
         # print(f"TrackResultsMongoDB.remove(filter='{filter}'): data=\n", data)
 
         if data:
@@ -454,10 +447,6 @@ class TrackResults:
         else:
             print(f"TrackResultsMongoDB.remove(filter='{filter}'): nothing to remove")
             return
-
-        # FIXME: mongodb should handle dates automatically
-        # in df.columns:
-        #    df["date"] = pd.to_datetime(df["date"])
 
         if query is not None:
             to_remove = df.query(query).index
@@ -483,10 +472,10 @@ if __name__ == "__main__":
     import unittest
     import sys
 
-    import tests.test_track_results
+    import tests.test_track_results_flatten
 
     # Run all tests
-    suite = unittest.TestLoader().loadTestsFromModule(tests.test_track_results)
+    suite = unittest.TestLoader().loadTestsFromModule(tests.test_track_results_flatten)
 
     # Run the tests
     runner = unittest.TextTestRunner()
