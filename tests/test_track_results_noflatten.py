@@ -2,6 +2,7 @@ import unittest
 import time
 
 import pandas as pd
+import numpy as np
 
 import sys
 
@@ -41,6 +42,8 @@ class TestTrackResults(unittest.TestCase):
         cls.tracker.drop(simulate=False)
 
     def test_add(self):
+
+        self.tracker.remove(filter={}, simulate=False)
 
         t0 = time.perf_counter()
 
@@ -106,7 +109,7 @@ class TestTrackResults(unittest.TestCase):
 
         print(f"test_add() {time.perf_counter()-t0} sec")
 
-    def test_query(self):
+        ## QUERY
 
         t0 = time.perf_counter()
 
@@ -165,7 +168,9 @@ class TestTrackResults(unittest.TestCase):
 
         print(f"test_query() {time.perf_counter()-t0} sec")
 
-    def test_remove(self):
+        ## REMOVE
+
+        print(f"TestTrackResults.test_remove: collection={self.tracker.collection}")
 
         t0 = time.perf_counter()
 
@@ -201,13 +206,13 @@ class TestTrackResults(unittest.TestCase):
                 "results.acc": {"$gte": 0.5},
             },
             columns={
-                "platform_architecture": "a",
-                "platform_machine": "m",
-                "results_acc": "r",
+                "platform_architecture": "arch",
+                "platform_machine": "mach",
+                "results_acc": "results",
             },
         )
         print(df)
-        self.assertEqual(len(df), 2)
+        self.assertEqual(df.shape, (2, 3))
 
         # added record that will not match query
         params1 = {"lr": 0.01, "opt": "adam", "beta": [0.99, 0.99]}
@@ -241,6 +246,76 @@ class TestTrackResults(unittest.TestCase):
 
         print(f"test_remove() {time.perf_counter()-t0} sec")
 
+    def test_interesting_columns(self):
+        print(
+            f"TestTrackResults.test_interesting_columns: collection={self.tracker.collection}"
+        )
+
+        # mix float and lists
+        self.tracker.remove(filter={}, simulate=False)
+        params1 = {"lr": 0.01, "opt": "adam", "beta": [0.99, 0.99]}
+        results1 = {"time": pd.Timestamp.now()}
+        params2 = {"lr": 0.02, "opt": "adam", "beta": [0.99, 0.99]}
+        results2 = {"time": pd.Timestamp.now()}
+        params3 = {"lr": 0.03, "opt": "adam", "beta": [0.99, 0.99]}
+        results3 = {"time": pd.Timestamp.now()}
+
+        self.tracker.add(params1, results1, replace=False, flatten=True)
+        self.tracker.add(params2, results2, replace=False, flatten=True)
+        self.tracker.add(params3, results3, replace=False, flatten=True)
+
+        df = self.tracker.get(drop_constant_columns=False)
+        print(df)
+        assert df.shape == (3, 14)
+
+        df = self.tracker.get(drop_constant_columns=True)
+        print(df)
+        assert df.shape == (3, 3)  # date, lr, time
+
+        # mix float and nan and lists
+        self.tracker.remove(filter={}, simulate=False)
+        params1 = {"lr": 0.01, "opt": "adam", "beta": [0.99, 0.99]}
+        results1 = {"time": pd.Timestamp.now()}
+        params2 = {"lr": np.nan, "opt": "adam", "beta": [0.99, 0.99]}
+        results2 = {"time": pd.Timestamp.now()}
+        params3 = {"lr": np.nan, "opt": "adam", "beta": [0.99, 0.99]}
+        results3 = {"time": pd.Timestamp.now()}
+
+        self.tracker.add(params1, results1, replace=False, flatten=True)
+        self.tracker.add(params2, results2, replace=False, flatten=True)
+        self.tracker.add(params3, results3, replace=False, flatten=True)
+
+        df = self.tracker.get(drop_constant_columns=False)
+        print(df)
+        assert df.shape == (3, 14)
+
+        df = self.tracker.get(drop_constant_columns=True)
+        print(df)
+        assert df.shape == (3, 3)  # date, lr, time
+
+        # mix nan and lists
+        self.tracker.remove(filter={}, simulate=False)
+        params1 = {"lr": np.nan, "opt": "adam", "beta": [0.99, 0.99]}
+        results1 = {"time": pd.Timestamp.now()}
+        params2 = {"lr": np.nan, "opt": "adam", "beta": [0.99, 0.99]}
+        results2 = {"time": pd.Timestamp.now()}
+        params3 = {"lr": np.nan, "opt": "adam", "beta": [0.99, 0.99]}
+        results3 = {"time": pd.Timestamp.now()}
+
+        self.tracker.add(params1, results1, replace=False, flatten=True)
+        self.tracker.add(params2, results2, replace=False, flatten=True)
+        self.tracker.add(params3, results3, replace=False, flatten=True)
+
+        df = self.tracker.get(drop_constant_columns=False)
+        print(df)
+        assert df.shape == (3, 14)
+
+        df = self.tracker.get(drop_constant_columns=True)
+        print(df)
+        assert df.shape == (3, 2)  # date, time
+
+
+#        assert self.tracker.shape
 
 if __name__ == "__main__":
     unittest.main()

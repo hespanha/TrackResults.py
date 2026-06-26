@@ -113,16 +113,20 @@ def interesting_column(df, col) -> bool:
         n_unique = df[col].nunique(dropna=False)
         interesting = n_unique > 1
     else:
-        n_unique = None
-        try:
-            # solves case when some columns of nan get get mapped to dtype object
-            vals = set(df[col])
-            n_vals = len(vals)
-            interesting = n_vals > 1
-        except:
-            vals = None
-            n_vals = None
-            interesting = True
+        if True:
+            c = df[col].astype(str)
+            interesting = len(set(c)) > 1
+        else:
+            n_unique = None
+            try:
+                # solves case when some columns of nan get get mapped to dtype object
+                vals = set(df[col])
+                n_vals = len(vals)
+                interesting = n_vals > 1
+            except:
+                vals = None
+                n_vals = None
+                interesting = True
 
     return interesting
 
