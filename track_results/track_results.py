@@ -446,7 +446,7 @@ class TrackResults:
         sort_by_columns: bool = False,
         query_before_rename: bool = False,
         allow_duplicate_replacements: bool = False,
-        flatten: bool = False,
+        flatten: bool = True,
     ) -> pd.DataFrame:
         """
         Queries the results file and returns a pandas DataFrame.
