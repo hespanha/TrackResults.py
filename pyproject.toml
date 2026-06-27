@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "track_results"
-version = "0.1.5"
+version = "0.2.1"
 description = "A python package to store summaries of the results of multiple runs of one or several ML algorithms, to eventually select the best algorithms and/or set of meta-parameters."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -28,3 +28,7 @@ namespaces = true           # Enables implicit namespace packages (default behav
 
 [project.optional-dependencies]
 matplotlib = ["matplotlib"]
+test = ["pytest", "matplotlib"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

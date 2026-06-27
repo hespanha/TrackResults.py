@@ -33,17 +33,20 @@ class TestTrackResults(unittest.TestCase):
         cls.tracker = TrackResults(
             uri=cls.uri,
             collection=cls.collection,
+            verbose=True,
         )
-        cls.tracker.drop(simulate=False)
+        cls.tracker.drop(
+            simulate=False, silent=True
+        )  # Ensure a clean slate for each test
 
     @classmethod
     def tearDownClass(cls):
         print(f"TestTrackResults.tearDownClass: collection={cls.tracker.collection}")
-        cls.tracker.drop(simulate=False)
+        cls.tracker.drop(simulate=False, silent=True)
 
     def test_add(self):
 
-        self.tracker.remove(filter={}, simulate=False)
+        self.tracker.remove(filter={}, simulate=False, silent=True)
 
         t0 = time.perf_counter()
 
@@ -58,7 +61,7 @@ class TestTrackResults(unittest.TestCase):
         # Add first record
         params1 = {"lr": 0.01, "opt": "adam", "beta": [0.99, 0.99]}
         results1 = {"acc": 0.9, "time": t1, "dt": dt}
-        self.tracker.add(params1, results1, replace=True, flatten=False)
+        self.tracker.add(params1, results1, replace=True)
         df = self.tracker.get()
         # print(df.keys())
         print(df)
@@ -72,7 +75,7 @@ class TestTrackResults(unittest.TestCase):
         # Add second record
         params2 = {"lr": 0.02, "opt": "sgd"}
         results2 = {"acc": 0.8}
-        self.tracker.add(params2, results2, flatten=False)
+        self.tracker.add(params2, results2)
         df = self.tracker.get()
         # print(df.keys())
         print(df)
@@ -86,7 +89,7 @@ class TestTrackResults(unittest.TestCase):
         # Add third record (repeated so replace)
         params2 = {"lr": 0.02, "opt": "sgd"}
         results2 = {"acc": 0.7}
-        self.tracker.add(params2, results2, replace=True, flatten=False)
+        self.tracker.add(params2, results2, replace=True)
         df = self.tracker.get()
         # print(df.keys())
         print(df)
@@ -98,7 +101,7 @@ class TestTrackResults(unittest.TestCase):
         # Add forth record (repeated but does not replace)
         params2 = {"lr": 0.02, "opt": "sgd"}
         results2 = {"acc": 0.6}
-        self.tracker.add(params2, results2, replace=False, flatten=False)
+        self.tracker.add(params2, results2, replace=False)
         df = self.tracker.get()
         # print(df.keys())
         print(df)
@@ -132,7 +135,7 @@ class TestTrackResults(unittest.TestCase):
 
         # Test querying with a filter string
         # Note: using backticks for columns with dots
-        df_filtered = self.tracker.get(filter={"parameters.lr": 0.01})
+        df_filtered = self.tracker.get(filter={"parameters_lr": 0.01})
         print(df_filtered)
         self.assertEqual(len(df_filtered), 1)
         self.assertEqual(df_filtered.iloc[0]["parameters_opt"], "adam")
@@ -183,27 +186,27 @@ class TestTrackResults(unittest.TestCase):
         self.assertEqual(len(df), 3)
 
         # nothing matches query
-        self.tracker.remove(filter={"results.acc": 1.0}, simulate=True)
+        self.tracker.remove(filter={"results_acc": 1.0}, simulate=True, silent=True)
         df = self.tracker.get()
         self.assertEqual(len(df), 3)
-        self.tracker.remove(filter={"results.acc": 1.0}, simulate=False)
+        self.tracker.remove(filter={"results_acc": 1.0}, simulate=False, silent=True)
         df = self.tracker.get()
         self.assertEqual(len(df), 3)
 
         # 1 record matches query
-        self.tracker.remove(filter={"results.acc": 0.9}, simulate=True)
+        self.tracker.remove(filter={"results_acc": 0.9}, simulate=True, silent=True)
         df = self.tracker.get()
         self.assertEqual(len(df), 3)
-        self.tracker.remove(filter={"results.acc": 0.9}, simulate=False)
+        self.tracker.remove(filter={"results_acc": 0.9}, simulate=False, silent=True)
         df = self.tracker.get()
         self.assertEqual(len(df), 2)
 
         # multi-query
         df = self.tracker.get(
             filter={
-                "platform.architecture": ["64bit", ""],
-                "platform.machine": "x86_64",
-                "results.acc": {"$gte": 0.5},
+                "platform_architecture": ["64bit", ""],
+                "platform_machine": "x86_64",
+                "results_acc": {"$gte": 0.5},
             },
             columns={
                 "platform_architecture": "arch",
@@ -217,28 +220,30 @@ class TestTrackResults(unittest.TestCase):
         # added record that will not match query
         params1 = {"lr": 0.01, "opt": "adam", "beta": [0.99, 0.99]}
         results1 = {"acc": 0.1}
-        self.tracker.add(params1, results1, replace=True, flatten=False)
+        self.tracker.add(params1, results1, replace=True)
         df = self.tracker.get()
         self.assertEqual(len(df), 3)
 
         # 2 records match query
         self.tracker.remove(
             filter={
-                "platform.architecture": ["64bit", ""],
-                "platform.machine": "x86_64",
-                "results.acc": {"$gte": 0.5},
+                "platform_architecture": ["64bit", ""],
+                "platform_machine": "x86_64",
+                "results_acc": {"$gte": 0.5},
             },
             simulate=True,
+            silent=True,
         )
         df = self.tracker.get()
         self.assertEqual(len(df), 3)
         self.tracker.remove(
             filter={
-                "platform.architecture": ["64bit", ""],
-                "platform.machine": "x86_64",
-                "results.acc": {"$gte": 0.5},
+                "platform_architecture": ["64bit", ""],
+                "platform_machine": "x86_64",
+                "results_acc": {"$gte": 0.5},
             },
             simulate=False,
+            silent=True,
         )
         df = self.tracker.get()
         print(df)
@@ -252,7 +257,7 @@ class TestTrackResults(unittest.TestCase):
         )
 
         # mix float and lists
-        self.tracker.remove(filter={}, simulate=False)
+        self.tracker.remove(filter={}, simulate=False, silent=True)
         params1 = {"lr": 0.01, "opt": "adam", "beta": [0.99, 0.99]}
         results1 = {"time": pd.Timestamp.now()}
         params2 = {"lr": 0.02, "opt": "adam", "beta": [0.99, 0.99]}
@@ -260,9 +265,9 @@ class TestTrackResults(unittest.TestCase):
         params3 = {"lr": 0.03, "opt": "adam", "beta": [0.99, 0.99]}
         results3 = {"time": pd.Timestamp.now()}
 
-        self.tracker.add(params1, results1, replace=False, flatten=True)
-        self.tracker.add(params2, results2, replace=False, flatten=True)
-        self.tracker.add(params3, results3, replace=False, flatten=True)
+        self.tracker.add(params1, results1, replace=False)
+        self.tracker.add(params2, results2, replace=False)
+        self.tracker.add(params3, results3, replace=False)
 
         df = self.tracker.get(drop_constant_columns=False)
         print(df)
@@ -273,7 +278,7 @@ class TestTrackResults(unittest.TestCase):
         assert df.shape == (3, 3)  # date, lr, time
 
         # mix float and nan and lists
-        self.tracker.remove(filter={}, simulate=False)
+        self.tracker.remove(filter={}, simulate=False, silent=True)
         params1 = {"lr": 0.01, "opt": "adam", "beta": [0.99, 0.99]}
         results1 = {"time": pd.Timestamp.now()}
         params2 = {"lr": np.nan, "opt": "adam", "beta": [0.99, 0.99]}
@@ -281,9 +286,9 @@ class TestTrackResults(unittest.TestCase):
         params3 = {"lr": np.nan, "opt": "adam", "beta": [0.99, 0.99]}
         results3 = {"time": pd.Timestamp.now()}
 
-        self.tracker.add(params1, results1, replace=False, flatten=True)
-        self.tracker.add(params2, results2, replace=False, flatten=True)
-        self.tracker.add(params3, results3, replace=False, flatten=True)
+        self.tracker.add(params1, results1, replace=False)
+        self.tracker.add(params2, results2, replace=False)
+        self.tracker.add(params3, results3, replace=False)
 
         df = self.tracker.get(drop_constant_columns=False)
         print(df)
@@ -294,7 +299,7 @@ class TestTrackResults(unittest.TestCase):
         assert df.shape == (3, 3)  # date, lr, time
 
         # mix nan and lists
-        self.tracker.remove(filter={}, simulate=False)
+        self.tracker.remove(filter={}, simulate=False, silent=True)
         params1 = {"lr": np.nan, "opt": "adam", "beta": [0.99, 0.99]}
         results1 = {"time": pd.Timestamp.now()}
         params2 = {"lr": np.nan, "opt": "adam", "beta": [0.99, 0.99]}
@@ -302,9 +307,9 @@ class TestTrackResults(unittest.TestCase):
         params3 = {"lr": np.nan, "opt": "adam", "beta": [0.99, 0.99]}
         results3 = {"time": pd.Timestamp.now()}
 
-        self.tracker.add(params1, results1, replace=False, flatten=True)
-        self.tracker.add(params2, results2, replace=False, flatten=True)
-        self.tracker.add(params3, results3, replace=False, flatten=True)
+        self.tracker.add(params1, results1, replace=False)
+        self.tracker.add(params2, results2, replace=False)
+        self.tracker.add(params3, results3, replace=False)
 
         df = self.tracker.get(drop_constant_columns=False)
         print(df)

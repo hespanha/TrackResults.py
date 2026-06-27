@@ -4,6 +4,7 @@ import shutil
 import os
 import webbrowser
 import copy
+import sys
 from pathlib import Path
 import numpy as np
 
@@ -12,6 +13,7 @@ from track_results.track_results import (
     savefig_to_binary,
     binary_to_pdf,
     savefig_pickle2binary,
+    FLATTEN_SEPARATOR,
     pickle2binary_to_fig,
 )
 
@@ -58,20 +60,23 @@ class TestTrackResultsFigures(unittest.TestCase):
         """Show all figures and then clean up the temporary directory."""
         import matplotlib.pyplot as plt
 
-        # By calling plt.show() once, all figures will be displayed at the same time.
-        # The test will pause here until all figure windows are manually closed.
-        print("\nDisplaying all test figures. Close all plot windows to finish.")
-        plt.show()
+        # Only show plots for interactive inspection when not running under pytest.
+        # `pytest` imports itself, so we can check sys.modules.
+        if "pytest" not in sys.modules:
+            print("\nDisplaying all test figures. Close all plot windows to finish.")
+            plt.show()
+        else:
+            print("\nPytest is running, skipping interactive plt.show().")
 
         # Clean up after visual inspection
-        cls.tracker.drop(simulate=False)
+        cls.tracker.drop(simulate=False, silent=True)
         shutil.rmtree(cls.test_dir)
 
     def setUp(self):
         """Set up a temporary directory and a TrackResults instance for testing."""
         # Use mongita for local testing by not providing a URI
         self.tracker.remove(
-            filter={}, simulate=False
+            filter={}, simulate=False, silent=True
         )  # Ensure a clean slate for each test
 
     def test_figure_save_and_load_pipeline(self):
@@ -119,12 +124,12 @@ class TestTrackResultsFigures(unittest.TestCase):
         self.tracker.add(parameters=parameters, results=results)
 
         # 4. Retrieve it from the tracker
-        df = self.tracker.get()
+        df = self.tracker.get(flatten=True, drop_constant_columns=False)
         print(df)
         self.assertEqual(len(df), 1)
-        self.assertIn("results_my_figure", df.columns)
+        self.assertIn(f"results{FLATTEN_SEPARATOR}my_figure", df.columns)
 
-        retrieved_binary = df["results_my_figure"].iloc[0]
+        retrieved_binary = df[f"results{FLATTEN_SEPARATOR}my_figure"].iloc[0]
 
         # 5. Decode the binary back to a PDF file
         binary_to_pdf(retrieved_binary, self.output_pdf_path)
@@ -179,9 +184,9 @@ class TestTrackResultsFigures(unittest.TestCase):
         self.tracker.add(parameters=parameters, results=results)
 
         # 4. Retrieve it from the tracker
-        df = self.tracker.get()
+        df = self.tracker.get(flatten=True, drop_constant_columns=False)
         self.assertEqual(len(df), 1)
-        retrieved_binary = df["results_pickled_figure"].iloc[0]
+        retrieved_binary = df[f"results{FLATTEN_SEPARATOR}pickled_figure"].iloc[0]
 
         # 5. Deserialize the figure back into an object
         loaded_fig = pickle2binary_to_fig(retrieved_binary)
@@ -195,6 +200,88 @@ class TestTrackResultsFigures(unittest.TestCase):
         # Change scatter plot color
         ax_loaded.collections[0].set_facecolor("red")
         ax_loaded.legend(["cos(x) modified", "noisy points modified", "confidence"])
+
+    def test_get_figure_methods(self):
+        """
+        Tests the `get_figure_as_pdf` and `get_figure_object` methods,
+        including nested field access.
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.figure import Figure
+
+        # --- 1. Prepare PDF-based figure ---
+        fig_pdf, ax_pdf = plt.subplots()
+        ax_pdf.plot([1, 2, 3], label="PDF")
+        ax_pdf.set_title("PDF Figure")
+        pdf_binary = savefig_to_binary(fig_pdf)
+        plt.close(fig_pdf)
+
+        # --- 2. Prepare pickled figure ---
+        fig_pickle, ax_pickle = plt.subplots()
+        ax_pickle.plot([4, 5, 6], label="Pickle")
+        ax_pickle.set_title("Pickle Figure")
+        pickle_binary = savefig_pickle2binary(fig_pickle)
+        # Don't close this one, we'll compare it to the loaded version
+
+        # --- 3. Add records to the database ---
+        # Record 1: Figures at the top level of 'results'
+        self.tracker.add(
+            parameters={"test_name": "get_figure_top_level"},
+            results={"pdf_fig": pdf_binary, "pickle_fig": pickle_binary},
+        )
+        # Record 2: Figures in a nested dictionary
+        self.tracker.add(
+            parameters={"test_name": "get_figure_nested"},
+            results={"figures": {"pdf_fig": pdf_binary, "pickle_fig": pickle_binary}},
+        )
+
+        # --- 4. Retrieve records to get their _ids ---
+        df = self.tracker.get(flatten=False)
+        self.assertEqual(len(df), 2)
+        top_level_record = df[
+            df["parameters"].apply(lambda p: p["test_name"] == "get_figure_top_level")
+        ]
+        nested_record = df[
+            df["parameters"].apply(lambda p: p["test_name"] == "get_figure_nested")
+        ]
+        top_level_id = top_level_record.index[0]
+        nested_id = nested_record.index[0]
+
+        # --- 5. Test get_figure_as_pdf ---
+        pdf_path_1 = os.path.join(self.test_dir, "retrieved_top_level.pdf")
+        pdf_path_2 = os.path.join(self.test_dir, "retrieved_nested.pdf")
+
+        # Test with top-level field and string _id
+        self.tracker.get_figure_as_pdf(
+            _id=str(top_level_id),
+            field_name="results.pdf_fig",
+            output_filename=pdf_path_1,
+        )
+        self.assertTrue(os.path.exists(pdf_path_1))
+
+        # Test with nested field and ObjectId _id
+        self.tracker.get_figure_as_pdf(
+            _id=nested_id,
+            field_name="results.figures.pdf_fig",
+            output_filename=pdf_path_2,
+        )
+        self.assertTrue(os.path.exists(pdf_path_2))
+
+        # --- 6. Test get_figure_object ---
+        # Test with top-level field
+        loaded_fig_1 = self.tracker.get_figure_object(
+            _id=top_level_id, field_name="results.pickle_fig"
+        )
+        self.assertIsInstance(loaded_fig_1, Figure)
+        self.assertEqual(loaded_fig_1.axes[0].get_title(), "Pickle Figure")
+
+        # Test with nested field
+        loaded_fig_2 = self.tracker.get_figure_object(
+            _id=nested_id, field_name="results.figures.pickle_fig"
+        )
+        self.assertIsInstance(loaded_fig_2, Figure)
+        # Verify content is the same as the original
+        self.assertEqual(loaded_fig_2.axes[0].lines[0].get_ydata().tolist(), [4, 5, 6])
 
 
 if __name__ == "__main__":

@@ -170,6 +170,13 @@ tracker.add(parameters=parameters, results=results)
 df = tracker.get(filter=...)
 figure_binary = df.iloc[0]['results_my_plot']
 binary_to_pdf(figure_binary, "recovered_plot.pdf")
+
+# Alternatively, you can use the `get_figure_as_pdf` helper method:
+df = tracker.get(filter=...)
+if not df.empty:
+    record = df.iloc[0]
+    # This saves the figure from the 'results_my_plot' field to 'recovered_plot.pdf'
+    tracker.get_figure_as_pdf(record, 'results_my_plot', 'recovered_plot.pdf')
 ```
 
 #### Saving Figures as Modifiable Objects (Pickle)

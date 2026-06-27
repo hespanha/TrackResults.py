@@ -16,7 +16,14 @@ df=track.query({class:,game:},last_number:int,last_time:time.period|time.duratio
 """
 
 from __future__ import annotations
-from typing import Any
+from typing import Any, cast
+
+import io
+import pickle
+from bson.binary import Binary
+from bson.objectid import ObjectId
+from bson.errors import InvalidId
+
 
 import pydantic
 
@@ -26,12 +33,13 @@ import numpy as np
 import pandas as pd
 import datetime
 import pprint
+import json
 
 #######################
 ## Dictionary utilities
 #######################
 
-FLATTEN_SEPARATOR = "_"
+FLATTEN_SEPARATOR = "."
 
 TYPES_TO_KEEP_AS_IS = (
     type(None),
@@ -42,9 +50,8 @@ TYPES_TO_KEEP_AS_IS = (
     str,
     pd.Timestamp,
     datetime.datetime,
-    list,
-    dict,
     uuid.UUID,
+    Binary,
 )
 
 # not natively supported by pymongo, but supported when converted to list
@@ -54,81 +61,68 @@ TYPE_CONVERT_TO_LIST = (
 )
 
 
-def flatten_dict(input: dict, prefix: str = "") -> dict[str, Any]:
+def _sanitize_for_db(data: dict[Any, Any]) -> dict[str, Any]:
     """
-    Flattens a nested dictionary by converting nested dictionaries using the "key1_key2_ ..." notation.
+    Recursively sanitizes data to ensure it's compatible with MongoDB.
+    - Converts tuples, sets, and numpy arrays to lists.
+    - Converts other non-standard types to strings.
 
     Args:
-        input (dict): The dictionary to flatten.
-        prefix (str, optional): The prefix to use for flattened keys. Defaults to "".
-        prefix (str, optional): The separator used to separate keys. Defaults to "_".
-                                ("." is problematic for mongodb)
+        data (Any): The data to sanitize (e.g., a dictionary, list, or primitive).
 
     Returns:
-        dict[str, Any]: The flattened dictionary.
+        Any: The sanitized data.
     """
-    output = {}
-    for k, v in input.items():
-        k = k.replace(".", FLATTEN_SEPARATOR)
-        if not isinstance(k, str):
-            k = str(k)
-        key = prefix + k
-        if isinstance(v, dict):
-            # print("flattening:", v)
-            v = flatten_dict(v, prefix=key + FLATTEN_SEPARATOR)
-            # print("flattened: ", v)
-            output |= v
-        # FIXME conversion to string makes sure table is sortable, but makes searches and sorting
-        # more difficult.
-        # FIXME might not be needed with pymongoarrow (but needed with mongita)
-        elif isinstance(v, np.ndarray):
-            # v = np.array2string(v)
-            v = (
-                v.tolist()
-            )  # supported by pymongo and mongita (unlike np.ndarray, and keeps the array structure
-            output[key] = v
-        elif isinstance(v, TYPE_CONVERT_TO_LIST):
-            output[key] = list(v)
-        elif isinstance(v, TYPES_TO_KEEP_AS_IS):
-            output[key] = v
-        else:  # if all else fails...
-            output[key] = str(v)
-    return output
+    if isinstance(data, dict):
+        return {str(k): _sanitize_for_db(v) for k, v in data.items()}
+
+    if isinstance(data, list):
+        return [_sanitize_for_db(v) for v in data]
+
+    # Convert types that are not natively supported by MongoDB/mongita
+    if isinstance(data, TYPE_CONVERT_TO_LIST):
+        return [_sanitize_for_db(v) for v in data]
+    if isinstance(data, np.ndarray):
+        return data.tolist()
+
+    # Keep basic, compatible types as they are
+    if isinstance(data, TYPES_TO_KEEP_AS_IS):
+        return data
+
+    # If all else fails, convert to string to ensure sortability and storage
+    return str(data)
 
 
-_hashable = (
-    "str",
-    "int",
-    "float",
-    "bool",
-    "bytes",
-    tuple[int, ...],
-    tuple[float, ...],
-)
+#######################
+## DataFrame utilities
+#######################
 
 
-def interesting_column(df, col) -> bool:
-    if df[col].dtype in _hashable:
-        # gets messed up by some nan
-        n_unique = df[col].nunique(dropna=False)
-        interesting = n_unique > 1
-    else:
-        if True:
-            c = df[col].astype(str)
-            interesting = len(set(c)) > 1
-        else:
-            n_unique = None
-            try:
-                # solves case when some columns of nan get get mapped to dtype object
-                vals = set(df[col])
-                n_vals = len(vals)
-                interesting = n_vals > 1
-            except:
-                vals = None
-                n_vals = None
-                interesting = True
+def interesting_column(df: pd.DataFrame, col: str) -> bool:
+    series = df[col]
+    # For simple numeric, boolean, or datetime types, nunique is efficient and correct.
+    # 'b' for bool, 'i' for int, 'u' for uint, 'f' for float, 'M' for datetime.
+    if series.dtype.kind in "biufM":
+        return series.nunique(dropna=False) > 1
 
-    return interesting
+    # For object types that can contain anything (lists, dicts, Binary, None, etc.),
+    # we need a more robust way to check for uniqueness.
+    def to_comparable(x):
+        """Converts values to a comparable/hashable representation."""
+        if isinstance(x, (list, dict)):
+            return json.dumps(x, sort_keys=True)
+        # For other types like Binary, numbers, None, they are already hashable.
+        return x
+
+    try:
+        # Apply the conversion and then check for uniqueness.
+        # Using a set is efficient for this.
+        unique_values = {to_comparable(v) for v in series}
+        return len(unique_values) > 1
+    except TypeError:
+        # If any object is not hashable and not JSON-serializable,
+        # we play it safe and keep the column.
+        return True
 
 
 def interesting_columns(
@@ -161,10 +155,6 @@ def interesting_columns(
 #######################
 ## Formatting utilities
 #######################
-
-import io
-import pickle
-from bson.binary import Binary
 
 
 def savefig_to_binary(fig, format="pdf") -> Binary:
@@ -338,25 +328,25 @@ class TrackResults:
     def __len__(self):
         return self.collection.count_documents({})
 
-    def drop(self, simulate: bool = True):
+    def drop(self, simulate: bool = True, silent: bool = False):
+        count = self.collection.count_documents({})
         if simulate:
-            count = self.collection.count_documents({})
-            print(
-                f"TrackResultsMongoDB.drop: simulated drop of collection={self.collection.name} with {count} documents"
-            )
+            if not silent:
+                print(
+                    f"TrackResultsMongoDB.drop: simulated drop of collection={self.collection.name} with {count} documents"
+                )
         else:
-            count = self.collection.count_documents({})
             self.database.drop_collection(self.collection.name)
-            print(
-                f"TrackResultsMongoDB.drop: drop of collection={self.collection.name} with {count} documents"
-            )
+            if not silent:
+                print(
+                    f"TrackResultsMongoDB.drop: drop of collection={self.collection.name} with {count} documents"
+                )
 
     def add(
         self,
         parameters: dict[str, Any] | pydantic.BaseModel,
         results: dict[str, Any] | pydantic.BaseModel,
         replace: bool = False,
-        flatten: bool = False,
     ) -> None:
         """
         Adds a new result record to the tracking file.
@@ -385,17 +375,20 @@ class TrackResults:
             "python_implementation": platform.python_implementation(),
         }
 
-        fields2match = {"parameters": parameters, "platform": platform_dict}
-        full_record = {
-            "date": pd.Timestamp.now(),
-            "platform": platform_dict,
-            "parameters": parameters,
-            "results": results,
-        }
-
-        if flatten:
-            fields2match = flatten_dict(fields2match)
-            full_record = flatten_dict(full_record)
+        fields2match: dict[str, Any] = _sanitize_for_db(
+            {
+                "parameters": parameters,
+                "platform": platform_dict,
+            }
+        )
+        full_record: dict[str, Any] = _sanitize_for_db(
+            {
+                "date": pd.Timestamp.now(),
+                "platform": platform_dict,
+                "parameters": parameters,
+                "results": results,
+            }
+        )
 
         # pprint.pprint(record, indent=3)
 
@@ -422,10 +415,105 @@ class TrackResults:
                 )
         else:
             rc = self.collection.insert_one(full_record)
-            print("rc:", rc)
+            # print("rc:", rc)
             print(
                 f"TrackResultsMongoDB.add(replace=False): inserted record with id={rc.inserted_id}"
             )
+
+    def _get_nested_field(self, _id: Any, field_name: str) -> Any:
+        """
+        Internal helper to retrieve a potentially nested field from a specific document.
+
+        Args:
+            _id (Any): The _id of the document to retrieve.
+            field_name (str): The name of the field to retrieve. Can use dot notation
+                              for nested fields (e.g., 'results.my_figure').
+
+        Returns:
+            Any: The value of the requested field.
+
+        Raises:
+            ValueError: If no document with the given _id is found.
+            KeyError: If the field is not found in the document.
+        """
+
+        # Projection ensures we only retrieve the necessary field, which is efficient.
+        processed_id = _id
+        if isinstance(_id, str):
+            try:
+                # Attempt to convert string to ObjectId, as this is a common use case.
+                processed_id = ObjectId(_id)
+            except InvalidId:
+                # If conversion fails, assume the _id was intended to be a string.
+                pass
+
+        # Conditionally apply projection.
+        if isinstance(self.collection, pymongo.collection.Collection):
+            # For real MongoDB, use projection for efficiency.
+            doc = self.collection.find_one(
+                {"_id": processed_id}, projection={field_name: 1}
+            )
+        else:
+            # Mongita currently does not support projections.
+            # This is acceptable as it's a fast lookup by _id.
+            doc = self.collection.find_one({"_id": processed_id})
+
+        if doc is None:
+            raise ValueError(f"No document found with _id: {_id}")
+
+        # Traverse the document using the dot-separated field name
+        value = doc
+        for key in field_name.split("."):
+            if isinstance(value, dict):
+                value = value.get(key)
+                if value is None:
+                    raise KeyError(
+                        f"Field part '{key}' not found in the path '{field_name}' for document with _id: {_id}"
+                    )
+            else:
+                raise KeyError(
+                    f"Cannot access sub-field '{key}'; '{field_name}' path is invalid for document with _id: {_id}"
+                )
+        return value
+
+    def get_figure_as_pdf(
+        self, _id: Any, field_name: str, output_filename: str
+    ) -> None:
+        """
+        Retrieves a figure stored as binary PDF data and saves it to a file.
+
+        Args:
+            _id (Any): The _id of the document containing the figure.
+            field_name (str): The field name where the figure's binary data is stored
+                              (e.g., 'results.my_figure').
+            output_filename (str): The path where the output PDF file will be saved.
+        """
+        binary_data = self._get_nested_field(_id, field_name)
+
+        if not isinstance(binary_data, Binary):
+            raise TypeError(
+                f"The data in field '{field_name}' is not of type bson.binary.Binary. "
+                f"Found type: {type(binary_data).__name__}"
+            )
+
+        binary_to_pdf(binary_data, output_filename)
+
+    def get_figure_object(self, _id: Any, field_name: str):
+        """
+        Retrieves a pickled matplotlib figure and returns it as a Figure object.
+
+        Args:
+            _id (Any): The _id of the document containing the figure.
+            field_name (str): The field name where the pickled figure is stored
+                              (e.g., 'results.pickled_figure').
+
+        Returns:
+            matplotlib.figure.Figure: The deserialized matplotlib figure object.
+        """
+        binary_data = self._get_nested_field(_id, field_name)
+
+        # The pickle2binary_to_fig function already handles the type check for Binary
+        return pickle2binary_to_fig(binary_data)
 
     def __str__(self):
         data = list(self.collection.find({}))
@@ -446,22 +534,45 @@ class TrackResults:
         sort_by_columns: bool = False,
         query_before_rename: bool = False,
         allow_duplicate_replacements: bool = False,
-        flatten: bool = False,
+        flatten: bool = True,
     ) -> pd.DataFrame:
         """
         Queries the results file and returns a pandas DataFrame.
 
         Args:
-            filter (dict[str, Any]): The filter to apply to the query.
-            exclude_fields (list[str] | None, optional): A list of fields to exclude from the results. Defaults to None.
-            query (str): pandas query to select rows
-            last_time (pd.Timestamp | None, optional): Filter results older than this time. Defaults to None.
-            time_interval (pd.Timedelta | None, optional): Filter results older than now - time_interval. Defaults to None.
-            columns (dict[str,str] | None, optional): Dictionary of with columns to keep (keys)
-                and new names (values). Defaults to None.
-            flatten (bool, optional): Whether to flatten nested dictionaries before converting
-                to DataFrame. Defaults to True.
+            Record Selection
 
+            - filter (dict[str, Any], optional): The MongoDB filter to apply to the query. Defaults to {}.
+            - query (str, optional): A pandas `query` string to select rows from the resulting DataFrame. Defaults to None.
+            - last_time (pd.Timestamp | None, optional): Filter results older than this time. Defaults to None.
+            - time_interval (pd.Timedelta | None, optional): Filter results older than now - time_interval. Defaults to None.
+            - query_before_rename (bool, optional): If True, applies the `query` before renaming columns. Defaults to False.
+
+            Column Selection and Renaming
+
+            - columns (dict[str,str] | None, optional): A dictionary where keys are columns to keep and values are their new names.
+                If None, all columns are kept. Defaults to None.
+            - exclude_fields (list[str] | None, optional): A list of fields to exclude from the results at the database level.
+                Defaults to None.
+            - drop_constant_columns (bool, optional): If True, drops columns where all values are the same.
+                `None` values are treated as equal, as are `np.nan` values. Lists and dicts are
+                compared by their content. Defaults to False.
+            - keep_columns (list[str], optional): List of columns to keep, even if they are constant.
+                Used in conjunction with `drop_constant_columns=True`. Defaults to [].
+            - allow_duplicate_replacements (bool, optional): If True, allows duplicate names in the values of the
+                `columns` dictionary. Defaults to False.
+
+            Record Sorting
+
+            - sort_by_params (bool, optional): If True, sorts the DataFrame by parameter fields and then by date.
+                Defaults to True.
+            - sort_by_columns (bool, optional): If True, sorts the DataFrame by the columns specified in the `columns`
+                argument. Defaults to False.
+
+            Data Formatting
+
+                - flatten (bool, optional): Whether to flatten nested dictionaries before converting
+                  to DataFrame. Defaults to False.
 
         Returns:
             pd.DataFrame: A DataFrame containing the filtered results.
@@ -477,11 +588,13 @@ class TrackResults:
         data: list[dict[str, Any]] = list(self.collection.find(filter, projection))
         # print(f"TrackResultsMongoDB.get: collection.find() found {len(data)} records")
 
-        if flatten:
-            data = [flatten_dict(record) for record in data]
-
         if data:
-            df = pd.DataFrame.from_records(data, index="_id")
+            if flatten:
+                df = pd.json_normalize(data, sep=FLATTEN_SEPARATOR)
+                if "_id" in df.columns:
+                    df = df.set_index("_id")
+            else:
+                df = pd.DataFrame.from_records(data, index="_id")
         else:
             return pd.DataFrame()
 
@@ -494,9 +607,9 @@ class TrackResults:
             # print(f"sorting by {parameter_fields}")
             df.sort_values(
                 by=parameter_fields,
-                key=lambda col: (
-                    col.astype(str) if col.dtype == "object" else col
-                ),  # protection against unhashable types (e.g. dicts) that might be in parameters, but still sort them in a deterministic way
+                # The key applies to each element in the series, not the series itself.
+                # This handles unhashable types like dicts by converting them to strings for sorting.
+                key=lambda x: x.map(str) if x.dtype == "object" else x,
                 inplace=True,
             )
 
@@ -540,9 +653,8 @@ class TrackResults:
             # print("sort_by", sort_by)
             df.sort_values(
                 by=sort_by,
-                key=lambda col: (
-                    col.astype(str) if col.dtype == "object" else col
-                ),  # protection against unhashable types (e.g. dicts) that might be in parameters, but still sort them in a deterministic way
+                # The key applies to each element in the series, not the series itself.
+                key=lambda x: x.map(str) if x.dtype == "object" else x,
                 inplace=True,
             )
 
@@ -558,6 +670,7 @@ class TrackResults:
         filter: dict = {},
         query: str | None = None,
         simulate: bool = True,
+        silent: bool = False,
     ) -> None:
         """
         Queries the results file and returns a pandas DataFrame.
@@ -571,7 +684,10 @@ class TrackResults:
         if data:
             df = pd.DataFrame.from_records(data, index="_id")
         else:
-            print(f"TrackResultsMongoDB.remove(filter='{filter}'): nothing to remove")
+            if not silent:
+                print(
+                    f"TrackResultsMongoDB.remove(filter='{filter}'): nothing to remove"
+                )
             return
 
         if query is not None:
@@ -583,25 +699,27 @@ class TrackResults:
             to_remove_list = to_remove.tolist()
 
         if len(to_remove_list) == 0:
-            print("TrackResultsMongoDB.remove: nothing to remove")
+            if not silent:
+                print("TrackResultsMongoDB.remove: nothing to remove")
             return
 
-        print(f"TrackResultsMongoDB.remove: will remove indices {to_remove}")
+        if not silent:
+            print(f"TrackResultsMongoDB.remove: will remove indices {to_remove}")
 
-        if simulate:
-            print("TrackResultsMongoDB.remove: only simulated remove")
-        else:
+        if not simulate:
             self.collection.delete_many({"_id": {"$in": to_remove_list}})
+        elif not silent:
+            print("TrackResultsMongoDB.remove: only simulated remove")
 
 
 if __name__ == "__main__":
     import unittest
     import sys
 
-    import tests.test_track_results_flatten
+    import old.test_track_results_flatten
 
     # Run all tests
-    suite = unittest.TestLoader().loadTestsFromModule(tests.test_track_results_flatten)
+    suite = unittest.TestLoader().loadTestsFromModule(old.test_track_results_flatten)
 
     # Run the tests
     runner = unittest.TextTestRunner()
