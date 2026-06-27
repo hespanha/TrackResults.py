@@ -33,8 +33,9 @@ class TestTrackResults(unittest.TestCase):
         cls.tracker = TrackResults(
             uri=cls.uri,
             collection=cls.collection,
+            verbose=True,
         )
-        cls.tracker.drop(simulate=False)
+        cls.tracker.drop(simulate=False)  # Ensure a clean slate for each test
 
     @classmethod
     def tearDownClass(cls):

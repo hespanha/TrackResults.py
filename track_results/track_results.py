@@ -158,6 +158,121 @@ def interesting_columns(
     return df[interesting_cols]
 
 
+#######################
+## Formatting utilities
+#######################
+
+import io
+import pickle
+from bson.binary import Binary
+
+
+def savefig_to_binary(fig, format="pdf") -> Binary:
+    """Saves a matplotlib figure to a binary PDF format for storage.
+
+    Args:
+        fig (Figure): The matplotlib figure to be saved.
+
+    Returns:
+        Binary: A binary representation of the figure in PDF format.
+    """
+    try:
+        from matplotlib.figure import Figure
+    except ImportError:
+        raise ImportError(
+            "To use this function, please install matplotlib. "
+            "You can install it with: pip install track_results[matplotlib]"
+        )
+
+    assert isinstance(fig, Figure), "Input must be a matplotlib Figure."
+    pdf_buffer = io.BytesIO()
+    fig.savefig(pdf_buffer, format=format, bbox_inches="tight")
+    pdf_buffer.seek(0)
+    binary_data = Binary(pdf_buffer.read())
+    print(f"savefig_to_binary: created binary container with {len(binary_data)} bytes")
+    return binary_data
+
+
+def binary_to_pdf(binary_data: Binary, filename: str):
+    """Decodes a binary object and saves it to a file.
+
+    This is useful to recover a PDF file stored using `save_figure_to_binary`.
+
+    Args:
+        binary_data (Binary): The binary data to decode.
+        filename (str): The path to save the file. The file extension should
+            match the original format (e.g., '.pdf').
+    """
+    if not isinstance(binary_data, Binary):
+        raise TypeError("Input must be a bson.binary.Binary object.")
+
+    with open(filename, "wb") as f:
+        f.write(binary_data)
+    print(f"Figure saved to {filename}")
+
+
+def savefig_pickle2binary(fig) -> Binary:
+    """Serializes a matplotlib figure object using pickle for storage.
+
+    This allows the figure to be reloaded as a Python object for further modification.
+
+    Warning:
+        Unpickling data from an untrusted source is a security risk. Only use
+        this function on data that your application has generated.
+
+    Args:
+        fig (Figure): The matplotlib figure to be serialized.
+
+    Returns:
+        Binary: A binary representation of the pickled figure object.
+    """
+    try:
+        from matplotlib.figure import Figure
+    except ImportError:
+        raise ImportError(
+            "To use this function, please install matplotlib. "
+            "You can install it with: pip install track_results[matplotlib]"
+        )
+    if not isinstance(fig, Figure):
+        raise TypeError("Input must be a matplotlib.figure.Figure object.")
+
+    pickled_fig = pickle.dumps(fig)
+    binary_data = Binary(pickled_fig)
+    print(
+        f"savefig_pickle2binary: created binary container with {len(binary_data)} bytes"
+    )
+    return binary_data
+
+
+def pickle2binary_to_fig(binary_data: Binary):
+    """Deserializes a binary object into a matplotlib figure.
+
+    Args:
+        binary_data (Binary): The binary data containing the pickled figure.
+
+    Returns:
+        Figure: The deserialized matplotlib figure object.
+    """
+    if not isinstance(binary_data, Binary):
+        raise TypeError("Input must be a bson.binary.Binary object.")
+
+    try:
+        from matplotlib.figure import Figure
+    except ImportError:
+        raise ImportError(
+            "To use this function, please install matplotlib. "
+            "You can install it with: pip install track_results[matplotlib]"
+        )
+    from matplotlib.figure import Figure
+
+    fig = pickle.loads(binary_data)
+
+    if not isinstance(fig, Figure):
+        raise TypeError("Deserialized object is not a matplotlib.figure.Figure.")
+
+    return fig
+
+
 #########################
 ## Class to track results
 #########################
@@ -241,7 +356,7 @@ class TrackResults:
         parameters: dict[str, Any] | pydantic.BaseModel,
         results: dict[str, Any] | pydantic.BaseModel,
         replace: bool = False,
-        flatten: bool = True,
+        flatten: bool = False,
     ) -> None:
         """
         Adds a new result record to the tracking file.
@@ -320,6 +435,7 @@ class TrackResults:
         self,
         *,
         filter: dict[str, Any] = {},
+        exclude_fields: list[str] | None = None,
         query: str | None = None,
         last_time: pd.Timestamp | None = None,
         time_interval: pd.Timedelta | None = None,
@@ -330,12 +446,14 @@ class TrackResults:
         sort_by_columns: bool = False,
         query_before_rename: bool = False,
         allow_duplicate_replacements: bool = False,
-        flatten: bool = True,
+        flatten: bool = False,
     ) -> pd.DataFrame:
         """
         Queries the results file and returns a pandas DataFrame.
 
         Args:
+            filter (dict[str, Any]): The filter to apply to the query.
+            exclude_fields (list[str] | None, optional): A list of fields to exclude from the results. Defaults to None.
             query (str): pandas query to select rows
             last_time (pd.Timestamp | None, optional): Filter results older than this time. Defaults to None.
             time_interval (pd.Timedelta | None, optional): Filter results older than now - time_interval. Defaults to None.
@@ -352,7 +470,11 @@ class TrackResults:
         if columns is None:
             columns = self.columns
 
-        data: list[dict[str, Any]] = list(self.collection.find(filter))
+        projection = None
+        if exclude_fields:
+            projection = {field: 0 for field in exclude_fields}
+
+        data: list[dict[str, Any]] = list(self.collection.find(filter, projection))
         # print(f"TrackResultsMongoDB.get: collection.find() found {len(data)} records")
 
         if flatten:

@@ -1,4 +1,12 @@
-__all__ = ["interesting_columns", "flatten_dict", "TrackResults"]
+__all__ = [
+    "interesting_columns",
+    "flatten_dict",
+    "TrackResults",
+    "savefig_to_binary",
+    "binary_to_pdf",
+    "savefig_pickle2binary",
+    "pickle2binary_to_fig",
+]
 
 import importlib.metadata
 
