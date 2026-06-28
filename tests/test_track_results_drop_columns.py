@@ -1,12 +1,20 @@
+import sys
+import os
+
+# Add the project root to the Python path if this file is run directly.
+if __name__ == "__main__" and __package__ is None:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    sys.path.insert(0, project_root)
+
 import unittest
 import numpy as np
 import pandas as pd
-from track_results import TrackResults
 from track_results.track_results import (
     savefig_to_binary,
     FLATTEN_SEPARATOR,
 )
 from bson.binary import Binary
+from tests.base import TestTrackResultsBase, TEST_CONFIGS
 
 try:
     import matplotlib.pyplot as plt
@@ -16,33 +24,23 @@ except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
 
-class TestDropConstantColumns(unittest.TestCase):
+class TestDropConstantColumns(TestTrackResultsBase):
     # ANSI escape codes for colors
     RED = "\033[91m"
     BLUE = "\033[94m"
     ENDC = "\033[0m"
 
-    @classmethod
-    def setUpClass(cls):
-        """Set up a shared TrackResults instance for all tests in this class."""
-        cls.collection = "test_collection_drop"
-        cls.track = TrackResults(
-            uri=None,  # Use Mongita
-            collection=cls.collection,
-            verbose=False,
-        )
-        cls.track.drop(
-            simulate=False, silent=True
-        )  # Ensure the collection is empty before starting
+    # This flag tells the unittest discovery process to not run this base class directly.
+    __test__ = False
 
-    @classmethod
-    def tearDownClass(cls):
-        """Clean up the database after all tests in this class have run."""
-        cls.track.drop(simulate=False, silent=True)
+    collection_name = "test_collection_drop"
 
     def setUp(self):
-        """Ensure the collection is empty before each test."""
-        self.track.remove(filter={}, simulate=False, silent=True)
+        """Set up the test prefix for logging."""
+        super().setUp()
+        if not self.config:
+            self.skipTest("Base class should not be run directly.")
+        self.test_prefix = f"[{self.config['name']}]"
 
     def _run_test(
         self, records, dropped_cols, kept_cols, test_description, flatten=True
@@ -53,6 +51,7 @@ class TestDropConstantColumns(unittest.TestCase):
                 parameters=record.get("params", {}),
                 results=record.get("results", {}),
             )
+        full_test_description = f"{self.test_prefix} {test_description}"
 
         # Get the DataFrame both with and without dropping columns
         df_full = self.track.get(flatten=flatten, drop_constant_columns=False)
@@ -93,7 +92,7 @@ class TestDropConstantColumns(unittest.TestCase):
         else:
             # On success, print the summary
             print(
-                f"\n--- {self.BLUE}TEST SUCCESS{self.ENDC}: {test_description} ---\n"
+                f"\n--- {self.BLUE}TEST SUCCESS{self.ENDC}: {full_test_description} ---\n"
                 f"Expected to drop: {dropped_cols}\n"
                 f"Expected to keep: {kept_cols}\n"
                 f"Original DataFrame:\n{df_full}\n"
@@ -274,5 +273,16 @@ class TestDropConstantColumns(unittest.TestCase):
         )
 
 
+# Dynamically create test classes for each backend
+for config in TEST_CONFIGS:
+    class_name = f"TestDropConstantColumns_{config['name']}"
+    # Override the inherited __test__ = False from the base class
+    attributes = {"config": config, "__test__": True}
+    globals()[class_name] = type(class_name, (TestDropConstantColumns,), attributes)
+
+
 if __name__ == "__main__":
-    unittest.main()
+    # Invoke pytest on this file for direct execution.
+    import pytest
+
+    sys.exit(pytest.main(["-v", "-s", __file__]))

@@ -183,7 +183,7 @@ def savefig_to_binary(fig, format="pdf") -> Binary:
     return binary_data
 
 
-def binary_to_pdf(binary_data: Binary, filename: str):
+def binary_to_pdf(binary_data: Binary | bytes, filename: str):
     """Decodes a binary object and saves it to a file.
 
     This is useful to recover a PDF file stored using `save_figure_to_binary`.
@@ -193,8 +193,8 @@ def binary_to_pdf(binary_data: Binary, filename: str):
         filename (str): The path to save the file. The file extension should
             match the original format (e.g., '.pdf').
     """
-    if not isinstance(binary_data, Binary):
-        raise TypeError("Input must be a bson.binary.Binary object.")
+    if not isinstance(binary_data, (Binary, bytes)):
+        raise TypeError("Input must be a bson.binary.Binary or bytes object.")
 
     with open(filename, "wb") as f:
         f.write(binary_data)
@@ -234,7 +234,7 @@ def savefig_pickle2binary(fig) -> Binary:
     return binary_data
 
 
-def pickle2binary_to_fig(binary_data: Binary):
+def pickle2binary_to_fig(binary_data: Binary | bytes):
     """Deserializes a binary object into a matplotlib figure.
 
     Args:
@@ -243,8 +243,8 @@ def pickle2binary_to_fig(binary_data: Binary):
     Returns:
         Figure: The deserialized matplotlib figure object.
     """
-    if not isinstance(binary_data, Binary):
-        raise TypeError("Input must be a bson.binary.Binary object.")
+    if not isinstance(binary_data, (Binary, bytes)):
+        raise TypeError("Input must be a bson.binary.Binary or bytes object.")
 
     try:
         from matplotlib.figure import Figure
@@ -268,12 +268,12 @@ def pickle2binary_to_fig(binary_data: Binary):
 #########################
 
 import pymongo
-import pymongo.database
-import pymongo.collection
+import pymongo.database as pymongo_database
+import pymongo.collection as pymongo_collection
 
 import mongita
-from mongita.database import Database
-from mongita.collection import Collection
+import mongita.database as mongita_database
+import mongita.collection as mongita_collection
 
 
 class TrackResults:
@@ -282,13 +282,15 @@ class TrackResults:
     """
 
     __slots__ = [
+        "client",
         "database",
         "collection",
         "columns",
     ]
 
-    database: pymongo.database.Database | Database
-    collection: pymongo.collection.Collection | Collection
+    client: pymongo.MongoClient | mongita.MongitaClientDisk
+    database: pymongo_database.Database | mongita_database.Database
+    collection: pymongo_collection.Collection | mongita_collection.Collection
     columns: dict[str, str] | None
 
     def __init__(
@@ -306,12 +308,16 @@ class TrackResults:
             filename (str): The path to the file where results will be saved.
         """
         if uri is None:
-            print("TrackResultsTrackResultsMongoDB: using MongitaClientDisk")
-            client = mongita.MongitaClientDisk()
+            print(
+                f"TrackResults: using MongitaClientDisk to open local database '{database}', collection '{collection}'"
+            )
+            self.client = mongita.MongitaClientDisk()
         else:
-            print("TrackResultsTrackResultsMongoDB: using MongoClient")
-            client = pymongo.MongoClient(uri)
-        self.database = client[database]
+            print(
+                f"TrackResults: using MongoClient to connect to database '{database}', collection '{collection}'"
+            )
+            self.client = pymongo.MongoClient(uri)
+        self.database = self.client[database]
 
         self.collection = self.database[collection]
 
@@ -327,6 +333,10 @@ class TrackResults:
 
     def __len__(self):
         return self.collection.count_documents({})
+
+    def close(self):
+        """Closes the connection to the database client."""
+        self.client.close()
 
     def drop(self, simulate: bool = True, silent: bool = False):
         count = self.collection.count_documents({})
@@ -448,7 +458,7 @@ class TrackResults:
                 pass
 
         # Conditionally apply projection.
-        if isinstance(self.collection, pymongo.collection.Collection):
+        if isinstance(self.collection, pymongo_collection.Collection):
             # For real MongoDB, use projection for efficiency.
             doc = self.collection.find_one(
                 {"_id": processed_id}, projection={field_name: 1}
@@ -489,12 +499,6 @@ class TrackResults:
             output_filename (str): The path where the output PDF file will be saved.
         """
         binary_data = self._get_nested_field(_id, field_name)
-
-        if not isinstance(binary_data, Binary):
-            raise TypeError(
-                f"The data in field '{field_name}' is not of type bson.binary.Binary. "
-                f"Found type: {type(binary_data).__name__}"
-            )
 
         binary_to_pdf(binary_data, output_filename)
 
@@ -713,14 +717,11 @@ class TrackResults:
 
 
 if __name__ == "__main__":
-    import unittest
+    """
+    When this file is run directly, execute all tests using pytest.
+    This provides a convenient way to run the entire test suite.
+    """
     import sys
+    import pytest
 
-    import old.test_track_results_flatten
-
-    # Run all tests
-    suite = unittest.TestLoader().loadTestsFromModule(old.test_track_results_flatten)
-
-    # Run the tests
-    runner = unittest.TextTestRunner()
-    runner.run(suite)
+    sys.exit(pytest.main(["-v", "-s"]))

@@ -1,3 +1,11 @@
+import sys
+import os
+
+# Add the project root to the Python path if this file is run directly.
+if __name__ == "__main__" and __package__ is None:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    sys.path.insert(0, project_root)
+
 import unittest
 import tempfile
 import shutil
@@ -7,25 +15,14 @@ import copy
 import sys
 from pathlib import Path
 import numpy as np
-
+from tests.base import TestTrackResultsBase, TEST_CONFIGS
 from track_results.track_results import (
-    TrackResults,
     savefig_to_binary,
     binary_to_pdf,
     savefig_pickle2binary,
     FLATTEN_SEPARATOR,
     pickle2binary_to_fig,
 )
-
-try:
-    # the file my_secrets.py should create a variable `MONGODB_URI` with the URI of the MongoDB
-    import my_secrets
-
-    MONGODB_URI = my_secrets.MONGODB_URI
-except:
-    # if the file does not exist, will default to a mongita database
-    MONGODB_URI = None
-
 
 try:
     import matplotlib.pyplot as plt
@@ -36,48 +33,42 @@ except ImportError:
 
 
 @unittest.skipIf(not MATPLOTLIB_AVAILABLE, "matplotlib is not installed")
-class TestTrackResultsFigures(unittest.TestCase):
+class TestTrackResultsFigures(TestTrackResultsBase):
+    # This flag tells the unittest discovery process to not run this base class directly.
+    __test__ = False
+
+    # A flag to control interactive plot showing. Set to True when run directly.
+    INTERACTIVE_MODE = False
+
+    collection_name = "test_results_figures"
+
     @classmethod
     def setUpClass(cls):
         """Set up a temporary directory and a shared TrackResults instance for all tests."""
         cls.test_dir = tempfile.mkdtemp()
         cls.output_pdf_path = os.path.join(cls.test_dir, "output_figure.pdf")
-        # Use mongita for local testing by not providing a URI
-        cls.collection = "test_results"
-        cls.uri = MONGODB_URI
-        cls.uri = None
-        print(
-            f"TestTrackResults.setUpClass: uri={cls.uri}, collection={cls.collection}"
-        )
-        cls.tracker = TrackResults(
-            uri=cls.uri,
-            collection=cls.collection,
-            verbose=True,
-        )
+        # The setUp method from TestTrackResultsBase will handle creating self.track
+        # for each backend. We call super() to ensure base class setup is done.
+        super().setUpClass()
 
     @classmethod
     def tearDownClass(cls):
         """Show all figures and then clean up the temporary directory."""
         import matplotlib.pyplot as plt
 
-        # Only show plots for interactive inspection when not running under pytest.
-        # `pytest` imports itself, so we can check sys.modules.
-        if "pytest" not in sys.modules:
+        # Only show plots for interactive inspection when running the file directly.
+        if cls.INTERACTIVE_MODE:
             print("\nDisplaying all test figures. Close all plot windows to finish.")
             plt.show()
-        else:
-            print("\nPytest is running, skipping interactive plt.show().")
 
         # Clean up after visual inspection
-        cls.tracker.drop(simulate=False, silent=True)
         shutil.rmtree(cls.test_dir)
+        super().tearDownClass()
 
     def setUp(self):
-        """Set up a temporary directory and a TrackResults instance for testing."""
-        # Use mongita for local testing by not providing a URI
-        self.tracker.remove(
-            filter={}, simulate=False, silent=True
-        )  # Ensure a clean slate for each test
+        super().setUp()  # This will create self.track and clean the collection
+        if not self.config:
+            self.skipTest("Base class should not be run directly.")
 
     def test_figure_save_and_load_pipeline(self):
         """
@@ -121,10 +112,10 @@ class TestTrackResultsFigures(unittest.TestCase):
         # 3. Add it to the tracker
         parameters = {"test_name": "figure_pipeline"}
         results = {"my_figure": figure_binary}
-        self.tracker.add(parameters=parameters, results=results)
+        self.track.add(parameters=parameters, results=results)
 
         # 4. Retrieve it from the tracker
-        df = self.tracker.get(flatten=True, drop_constant_columns=False)
+        df = self.track.get(flatten=True, drop_constant_columns=False)
         print(df)
         self.assertEqual(len(df), 1)
         self.assertIn(f"results{FLATTEN_SEPARATOR}my_figure", df.columns)
@@ -140,8 +131,9 @@ class TestTrackResultsFigures(unittest.TestCase):
         # To visually inspect the saved PDF file, this will open the PDF
         # in your system's default viewer.
         pdf_uri = Path(self.output_pdf_path).as_uri()
-        print(f"\nOpening saved PDF file: {pdf_uri}")
-        webbrowser.open_new(pdf_uri)
+        if self.INTERACTIVE_MODE:
+            print(f"\nOpening saved PDF file: {pdf_uri}")
+            webbrowser.open_new(pdf_uri)
 
     def test_figure_pickle_and_modify_pipeline(self):
         """
@@ -181,10 +173,10 @@ class TestTrackResultsFigures(unittest.TestCase):
         # 3. Add it to the tracker
         parameters = {"test_name": "pickle_pipeline"}
         results = {"pickled_figure": pickled_figure}
-        self.tracker.add(parameters=parameters, results=results)
+        self.track.add(parameters=parameters, results=results)
 
         # 4. Retrieve it from the tracker
-        df = self.tracker.get(flatten=True, drop_constant_columns=False)
+        df = self.track.get(flatten=True, drop_constant_columns=False)
         self.assertEqual(len(df), 1)
         retrieved_binary = df[f"results{FLATTEN_SEPARATOR}pickled_figure"].iloc[0]
 
@@ -225,20 +217,20 @@ class TestTrackResultsFigures(unittest.TestCase):
 
         # --- 3. Add records to the database ---
         # Record 1: Figures at the top level of 'results'
-        self.tracker.add(
+        self.track.add(
             parameters={"test_name": "get_figure_top_level"},
             results={"pdf_fig": pdf_binary, "pickle_fig": pickle_binary},
         )
         # Record 2: Figures in a nested dictionary
-        self.tracker.add(
+        self.track.add(
             parameters={"test_name": "get_figure_nested"},
             results={"figures": {"pdf_fig": pdf_binary, "pickle_fig": pickle_binary}},
         )
 
         # --- 4. Retrieve records to get their _ids ---
-        df = self.tracker.get(flatten=False)
+        df = self.track.get(flatten=False)
         self.assertEqual(len(df), 2)
-        top_level_record = df[
+        top_level_record = df[  # noqa: F841
             df["parameters"].apply(lambda p: p["test_name"] == "get_figure_top_level")
         ]
         nested_record = df[
@@ -252,7 +244,7 @@ class TestTrackResultsFigures(unittest.TestCase):
         pdf_path_2 = os.path.join(self.test_dir, "retrieved_nested.pdf")
 
         # Test with top-level field and string _id
-        self.tracker.get_figure_as_pdf(
+        self.track.get_figure_as_pdf(
             _id=str(top_level_id),
             field_name="results.pdf_fig",
             output_filename=pdf_path_1,
@@ -260,7 +252,7 @@ class TestTrackResultsFigures(unittest.TestCase):
         self.assertTrue(os.path.exists(pdf_path_1))
 
         # Test with nested field and ObjectId _id
-        self.tracker.get_figure_as_pdf(
+        self.track.get_figure_as_pdf(
             _id=nested_id,
             field_name="results.figures.pdf_fig",
             output_filename=pdf_path_2,
@@ -269,14 +261,14 @@ class TestTrackResultsFigures(unittest.TestCase):
 
         # --- 6. Test get_figure_object ---
         # Test with top-level field
-        loaded_fig_1 = self.tracker.get_figure_object(
+        loaded_fig_1 = self.track.get_figure_object(
             _id=top_level_id, field_name="results.pickle_fig"
         )
         self.assertIsInstance(loaded_fig_1, Figure)
         self.assertEqual(loaded_fig_1.axes[0].get_title(), "Pickle Figure")
 
         # Test with nested field
-        loaded_fig_2 = self.tracker.get_figure_object(
+        loaded_fig_2 = self.track.get_figure_object(
             _id=nested_id, field_name="results.figures.pickle_fig"
         )
         self.assertIsInstance(loaded_fig_2, Figure)
@@ -284,5 +276,22 @@ class TestTrackResultsFigures(unittest.TestCase):
         self.assertEqual(loaded_fig_2.axes[0].lines[0].get_ydata().tolist(), [4, 5, 6])
 
 
+for config in TEST_CONFIGS:
+    class_name = f"TestTrackResultsFigures_{config['name']}"
+    # Override the inherited __test__ = False from the base class
+    attributes = {"config": config, "__test__": True}
+    globals()[class_name] = type(class_name, (TestTrackResultsFigures,), attributes)
+
+
 if __name__ == "__main__":
-    unittest.main()
+    # Set the flag to enable interactive plotting in tearDownClass for all
+    # dynamically generated test classes in this file.
+    print("Setting INTERACTIVE_MODE to True for direct execution.")
+    for name, obj in globals().copy().items():
+        if name.startswith("TestTrackResultsFigures_") and isinstance(obj, type):
+            obj.INTERACTIVE_MODE = True
+
+    # Invoke pytest on this file for direct execution.
+    import pytest
+
+    sys.exit(pytest.main(["-v", "-s", __file__]))

@@ -1,36 +1,33 @@
+import sys
+import os
+
+# Add the project root to the Python path if this file is run directly.
+if __name__ == "__main__" and __package__ is None:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    sys.path.insert(0, project_root)
+
 import unittest
-import numpy as np
 import pandas as pd
-from track_results import TrackResults
 from track_results.track_results import FLATTEN_SEPARATOR
+from tests.base import TestTrackResultsBase, TEST_CONFIGS
 
 
-class TestFlattenLogic(unittest.TestCase):
+class TestFlattenLogic(TestTrackResultsBase):
     # ANSI escape codes for colors
     RED = "\033[91m"
     BLUE = "\033[94m"
     ENDC = "\033[0m"
 
-    @classmethod
-    def setUpClass(cls):
-        """Set up a shared TrackResults instance for all tests in this class."""
-        cls.collection = "test_collection_flatten"
-        cls.track = TrackResults(
-            uri=None,  # Use Mongita
-            collection=cls.collection,
-            verbose=False,
-        )
-        cls.track.drop(simulate=False, silent=True)
+    # This flag tells the unittest discovery process to not run this base class directly.
+    __test__ = False
 
-    @classmethod
-    def tearDownClass(cls):
-        """Clean up the database after all tests in this class have run."""
-        cls.track.drop(simulate=False, silent=True)
+    collection_name = "test_collection_flatten"
 
     def setUp(self):
-        """Ensure the collection is empty before each test."""
-        self.track.remove(filter={}, simulate=False, silent=True)
-
+        """Define complex, nested records to be used in tests."""
+        super().setUp()
+        if not self.config:
+            self.skipTest("Base class should not be run directly.")
         # Define complex, nested records to be used in tests
         self.records = [
             {
@@ -76,6 +73,7 @@ class TestFlattenLogic(unittest.TestCase):
 
     def _run_test(self, df, expected_cols, test_description):
         """Helper function to validate DataFrame columns and report results."""
+        test_description = f"[{self.config['name']}] {test_description}"
         returned_cols = {col for col in df.columns if not col.startswith("platform")}
 
         if returned_cols == expected_cols:
@@ -145,5 +143,15 @@ class TestFlattenLogic(unittest.TestCase):
         self.assertEqual(df["parameters"].iloc[0]["nested_dict"]["a"], 10)
 
 
+for config in TEST_CONFIGS:
+    class_name = f"TestFlattenLogic_{config['name']}"
+    # Override the inherited __test__ = False from the base class
+    attributes = {"config": config, "__test__": True}
+    globals()[class_name] = type(class_name, (TestFlattenLogic,), attributes)
+
+
 if __name__ == "__main__":
-    unittest.main()
+    # Invoke pytest on this file for direct execution.
+    import pytest
+
+    sys.exit(pytest.main(["-v", "-s", __file__]))

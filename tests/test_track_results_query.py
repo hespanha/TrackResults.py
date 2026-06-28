@@ -1,35 +1,37 @@
+import sys
+import os
+
+# Add the project root to the Python path if this file is run directly.
+if __name__ == "__main__" and __package__ is None:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    sys.path.insert(0, project_root)
+
 import unittest
 import pandas as pd
-from track_results import TrackResults
-
 from track_results.track_results import FLATTEN_SEPARATOR
+from tests.base import TestTrackResultsBase, TEST_CONFIGS
 
 
-class TestFilterAndQuery(unittest.TestCase):
+class TestFilterAndQuery(TestTrackResultsBase):
     # ANSI escape codes for colors
     RED = "\033[91m"
     BLUE = "\033[94m"
     ENDC = "\033[0m"
 
-    @classmethod
-    def setUpClass(cls):
-        """Set up a shared TrackResults instance for all tests in this class."""
-        cls.collection = "test_collection_query"
-        cls.track = TrackResults(
-            uri=None,  # Use Mongita
-            collection=cls.collection,
-            verbose=False,
-        )
-        cls.track.drop(simulate=False, silent=True)
+    # This flag tells the unittest discovery process to not run this base class directly.
+    __test__ = False
 
-    @classmethod
-    def tearDownClass(cls):
-        """Clean up the database after all tests in this class have run."""
-        cls.track.drop(simulate=False, silent=True)
+    collection_name = "test_collection_query"
 
     def setUp(self):
         """Ensure the collection is empty and add a standard set of records."""
-        self.track.remove(filter={}, simulate=False, silent=True)
+        super().setUp()
+        # If config is not set, it means this is the base class being run directly
+        # by a test runner. We should skip the rest of the setup.
+        if not self.config:
+            self.skipTest("Base class should not be run directly.")
+
+        self.test_prefix = f"[{self.config['name']}]"
         self.records = [
             {
                 "params": {"id": 1, "lr": 0.01, "optimizer": "adam"},
@@ -53,7 +55,7 @@ class TestFilterAndQuery(unittest.TestCase):
 
     def test_mongodb_filter(self):
         """Tests the MongoDB `filter` on a nested field."""
-        test_description = "MongoDB `filter`"
+        test_description = f"{self.test_prefix} MongoDB `filter`"
         df = self.track.get(filter={"parameters.optimizer": "adam"}, flatten=False)
         if len(df) == 2 and all(
             df["parameters"].apply(lambda p: p["optimizer"] == "adam")
@@ -73,7 +75,7 @@ class TestFilterAndQuery(unittest.TestCase):
 
     def test_pandas_query_flattened(self):
         """Tests the pandas `query` on a flattened DataFrame."""
-        test_description = "Pandas `query` (flattened)"
+        test_description = f"{self.test_prefix} Pandas `query` (flattened)"
         score_col = f"results{FLATTEN_SEPARATOR}score"
         id_col = f"parameters{FLATTEN_SEPARATOR}id"
         query_str = f"`{score_col}` > 95"
@@ -94,7 +96,7 @@ class TestFilterAndQuery(unittest.TestCase):
 
     def test_combined_filter_and_query(self):
         """Tests combining `filter` and `query`."""
-        test_description = "Combined `filter` and `query`"
+        test_description = f"{self.test_prefix} Combined `filter` and `query`"
         id_col = f"parameters{FLATTEN_SEPARATOR}id"
         optimizer_col = f"parameters{FLATTEN_SEPARATOR}optimizer"
         score_col = f"results{FLATTEN_SEPARATOR}score"
@@ -121,7 +123,7 @@ class TestFilterAndQuery(unittest.TestCase):
 
     def test_filter_with_operators(self):
         """Tests the `filter` with MongoDB operators like `$gte`."""
-        test_description = "`filter` with operators"
+        test_description = f"{self.test_prefix} `filter` with operators"
         df = self.track.get(filter={"results.score": {"$gte": 96}}, flatten=False)
         if len(df) == 2 and all(df["results"].apply(lambda r: r["score"] >= 96)):
             print(
@@ -138,9 +140,15 @@ class TestFilterAndQuery(unittest.TestCase):
             )
 
 
+for config in TEST_CONFIGS:
+    class_name = f"TestFilterAndQuery_{config['name']}"
+    # Override the inherited __test__ = False from the base class
+    attributes = {"config": config, "__test__": True}
+    globals()[class_name] = type(class_name, (TestFilterAndQuery,), attributes)
+
+
 if __name__ == "__main__":
-    # You can run all tests in the file like this:
-    # python -m unittest tests/test_track_results_query.py
-    # Or run a specific test:
-    # python -m unittest tests.test_track_results_query.TestFilterAndQuery.test_mongodb_filter
-    unittest.main()
+    # Invoke pytest on this file for direct execution.
+    import pytest
+
+    sys.exit(pytest.main(["-v", "-s", __file__]))

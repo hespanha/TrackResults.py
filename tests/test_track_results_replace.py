@@ -1,143 +1,120 @@
+import sys
+import os
+
+# Add the project root to the Python path if this file is run directly.
+if __name__ == "__main__" and __package__ is None:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    sys.path.insert(0, project_root)
+
 import unittest
 import pandas as pd
-from track_results import TrackResults
-
 from track_results.track_results import FLATTEN_SEPARATOR
+from tests.base import TestTrackResultsBase, TEST_CONFIGS
 
 
-class TestReplaceLogic(unittest.TestCase):
+class TestReplaceLogic(TestTrackResultsBase):
     # ANSI escape codes for colors
     RED = "\033[91m"
     BLUE = "\033[94m"
     ENDC = "\033[0m"
 
-    @classmethod
-    def setUpClass(cls):
-        """Set up a shared TrackResults instance for all tests in this class."""
-        cls.collection = "test_collection_replace"
-        cls.track = TrackResults(
-            uri=None,  # Use Mongita
-            collection=cls.collection,
-            verbose=False,
-        )
-        cls.track.drop(simulate=False, silent=True)
+    # This flag tells the unittest discovery process to not run this base class directly.
+    __test__ = False
 
-    @classmethod
-    def tearDownClass(cls):
-        """Clean up the database after all tests in this class have run."""
-        cls.track.drop(simulate=False, silent=True)
+    collection_name = "test_collection_replace"
 
     def setUp(self):
-        """Ensure the collection is empty before each test."""
-        self.track.remove(filter={}, simulate=False, silent=True)
+        """Set up the test prefix for logging."""
+        super().setUp()
+        if not self.config:
+            self.skipTest("Base class should not be run directly.")
+        self.test_prefix = f"[{self.config['name']}]"
+        self.common_params = {"algorithm": "test_algo", "version": 1}
+        self.score_col = f"results{FLATTEN_SEPARATOR}score"
 
-    def test_replace_and_add_duplicate(self):
-        """
-        Tests the replace logic in the add() method.
-        1. Adds an initial record.
-        2. Adds a second record with the same parameters and `replace=True`,
-           verifying the original record is updated (upsert).
-        3. Adds a third record with the same parameters and `replace=False`,
-           verifying a new, duplicate record is created.
-        """
-        failures = []
-        success_messages = []
+    def test_initial_add(self):
+        """Verify that a single record can be added correctly."""
+        test_description = f"{self.test_prefix} Initial Add"
+        self.track.add(parameters=self.common_params, results={"score": 95})
+        df = self.track.get(flatten=True)
 
-        # Define a set of parameters that will be reused
-        # The `platform` info is also part of the matching criteria, but it's
-        # automatically captured and will be constant during the test run.
-        common_params = {"algorithm": "test_algo", "version": 1}
+        self.assertEqual(len(df), 1)
+        self.assertEqual(df[self.score_col].iloc[0], 95)
+        print(
+            f"\n--- {self.BLUE}TEST SUCCESS{self.ENDC}: {test_description} ---\n"
+            f"DataFrame:\n{df}"
+        )
 
-        # 1. Add the initial record
-        self.track.add(parameters=common_params, results={"score": 95})
-        df1 = self.track.get(flatten=True, drop_constant_columns=True)
-        score_col = f"results{FLATTEN_SEPARATOR}score"
+    def test_replace_existing_record(self):
+        """Verify that an existing record is replaced when replace=True."""
+        test_description = f"{self.test_prefix} Replace Existing"
+        # Add initial record
+        self.track.add(parameters=self.common_params, results={"score": 95})
 
-        if len(df1) == 1 and df1[score_col].iloc[0] == 95:
-            success_messages.append(
-                f"--- Step 1: Add initial record ---\n"
-                f"SUCCESS: Correctly added 1 record with {score_col} 95.\n"
-                f"DataFrame:\n{df1}"
-            )
-        else:
-            failures.append(
-                f"--- Step 1: Add initial record ---\n"
-                f"FAILURE: Expected 1 record with score 95.\n"
-                f"Found {len(df1)} records.\n"
-                f"DataFrame:\n{df1}"
-            )
-
-        # 2. Replace the existing record
+        # Replace it
         self.track.add(
-            parameters=common_params,
+            parameters=self.common_params,
             results={"score": 99, "status": "final"},
             replace=True,
         )
-        df2 = self.track.get(flatten=True, drop_constant_columns=True)
+        df = self.track.get(flatten=True)
         status_col = f"results{FLATTEN_SEPARATOR}status"
 
-        if len(df2) == 1 and df2[score_col].iloc[0] == 99 and status_col in df2.columns:
-            success_messages.append(
-                f"--- Step 2: Replace existing record ---\n"
-                f"SUCCESS: Correctly replaced record, new score is 99.\n"
-                f"DataFrame:\n{df2}"
-            )
-        else:
-            failures.append(
-                f"--- Step 2: Replace existing record ---\n"
-                f"FAILURE: Expected 1 record to be replaced with score 99.\n"
-                f"Found {len(df2)} records.\n"
-                f"DataFrame:\n{df2}"
-            )
+        self.assertEqual(len(df), 1)
+        self.assertEqual(df[self.score_col].iloc[0], 99)
+        self.assertIn(status_col, df.columns)
+        print(
+            f"\n--- {self.BLUE}TEST SUCCESS{self.ENDC}: {test_description} ---\n"
+            f"DataFrame:\n{df}"
+        )
 
-        # 3. Add a new record with the same parameters (no replace)
-        self.track.add(parameters=common_params, results={"score": 100}, replace=False)
-        df3 = self.track.get(flatten=True, drop_constant_columns=True)
+    def test_add_duplicate_record(self):
+        """Verify that a duplicate record is added when replace=False."""
+        test_description = f"{self.test_prefix} Add Duplicate"
+        # Add initial record
+        self.track.add(parameters=self.common_params, results={"score": 99})
 
-        if len(df3) == 2 and sorted(df3[score_col].tolist()) == [99, 100]:
-            success_messages.append(
-                f"--- Step 3: Add duplicate record ---\n"
-                f"SUCCESS: Correctly added a second record, total is now 2.\n"
-                f"DataFrame:\n{df3}"
-            )
-        else:
-            failures.append(
-                f"--- Step 3: Add duplicate record ---\n"
-                f"FAILURE: Expected 2 records after adding a duplicate.\n"
-                f"Found {len(df3)} records.\n"
-                f"DataFrame:\n{df3}"
-            )
+        # Add a "duplicate" (same params)
+        self.track.add(
+            parameters=self.common_params, results={"score": 100}, replace=False
+        )
+        df = self.track.get(flatten=True)
 
-        # 4. Test upsert functionality (add a new record with replace=True)
+        self.assertEqual(len(df), 2)
+        self.assertEqual(sorted(df[self.score_col].tolist()), [99, 100])
+        print(
+            f"\n--- {self.BLUE}TEST SUCCESS{self.ENDC}: {test_description} ---\n"
+            f"DataFrame:\n{df}"
+        )
+
+    def test_upsert_new_record(self):
+        """Verify that a new record is created if replace=True and no match is found."""
+        test_description = f"{self.test_prefix} Upsert New Record"
+        # Add one record to ensure the collection is not empty
+        self.track.add(parameters=self.common_params, results={"score": 99})
+
+        # Attempt to replace a non-existent record (should upsert)
         new_params = {"algorithm": "new_algo", "version": 1}
         self.track.add(parameters=new_params, results={"score": 80}, replace=True)
-        df4 = self.track.get(flatten=True, drop_constant_columns=True)
+        df = self.track.get(flatten=True)
 
-        if len(df4) == 3 and (df4[score_col] == 80).any():
-            success_messages.append(
-                f"--- Step 4: Upsert new record ---\n"
-                f"SUCCESS: Correctly upserted a new record, total is now 3.\n"
-                f"DataFrame:\n{df4}"
-            )
-        else:
-            failures.append(
-                f"--- Step 4: Upsert new record ---\n"
-                f"FAILURE: Expected 3 records after upserting a new one.\n"
-                f"Found {len(df4)} records.\n"
-                f"DataFrame:\n{df4}"
-            )
+        self.assertEqual(len(df), 2)
+        self.assertTrue((df[self.score_col] == 80).any())
+        print(
+            f"\n--- {self.BLUE}TEST SUCCESS{self.ENDC}: {test_description} ---\n"
+            f"DataFrame:\n{df}"
+        )
 
-        if failures:
-            self.fail(
-                f"\n--- {self.RED}TEST FAILED{self.ENDC} ---\n\n"
-                + "\n\n".join(failures)
-            )
-        else:
-            print(
-                f"\n--- {self.BLUE}TEST PASSED: test_replace_and_add_duplicate{self.ENDC} ---\n\n"
-                + "\n\n".join(success_messages)
-            )
+
+for config in TEST_CONFIGS:
+    class_name = f"TestReplaceLogic_{config['name']}"
+    # Override the inherited __test__ = False from the base class
+    attributes = {"config": config, "__test__": True}
+    globals()[class_name] = type(class_name, (TestReplaceLogic,), attributes)
 
 
 if __name__ == "__main__":
-    unittest.main()
+    # Invoke pytest on this file for direct execution.
+    import pytest
+
+    sys.exit(pytest.main(["-v", "-s", __file__]))
