@@ -273,7 +273,7 @@ class TestTrackResultsFigures(TestTrackResultsBase):
         )
         self.assertIsInstance(loaded_fig_2, Figure)
         # Verify content is the same as the original
-        self.assertEqual(loaded_fig_2.axes[0].lines[0].get_ydata().tolist(), [4, 5, 6])
+        self.assertEqual(loaded_fig_2.axes[0].lines[0].get_ydata().tolist(), [4, 5, 6])  # type: ignore
 
 
 for config in TEST_CONFIGS:
